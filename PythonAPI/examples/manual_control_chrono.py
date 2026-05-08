@@ -423,7 +423,16 @@ class KeyboardControl(object):
                     vehicle_json = "sedan/vehicle/Sedan_Vehicle.json"
                     powertrain_json = "sedan/powertrain/Sedan_SimpleMapPowertrain.json"
                     tire_json = "sedan/tire/Sedan_TMeasyTire.json"
-                    base_path = "~/carla/Build/chrono-install/share/chrono/data/vehicle/"
+                    base_path = os.path.abspath(os.path.join(
+                        os.path.dirname(__file__),
+                        '..',
+                        '..',
+                        'Build',
+                        'chrono-install',
+                        'share',
+                        'chrono',
+                        'data',
+                        'vehicle')) + os.sep
                     world.player.enable_chrono_physics(5000, 0.002, vehicle_json, powertrain_json, tire_json, base_path)
                 elif event.key == K_j and (pygame.key.get_mods() & KMOD_CTRL):
                     self._carsim_road = not self._carsim_road

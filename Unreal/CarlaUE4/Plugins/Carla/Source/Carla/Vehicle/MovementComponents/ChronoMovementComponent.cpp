@@ -8,6 +8,7 @@
 #include "ChronoMovementComponent.h"
 #include "Carla/Vehicle/CarlaWheeledVehicle.h"
 #include "Carla/Vehicle/MovementComponents/DefaultMovementComponent.h"
+#include "Misc/Paths.h"
 
 #include "compiler/disable-ue4-macros.h"
 #include <carla/rpc/String.h>
@@ -151,7 +152,13 @@ void UChronoMovementComponent::BeginPlay()
   Sys.SetSolverMaxIterations(150);
   Sys.SetMaxPenetrationRecoverySpeed(4.0);
 
-  InitializeChronoVehicle();
+  if (!InitializeChronoVehicle())
+  {
+    UE_LOG(LogCarla, Error, TEXT(
+        "Error: Failed to initialize Chrono vehicle. Disabling chrono physics..."));
+    UDefaultMovementComponent::CreateDefaultMovementComponent(CarlaVehicle);
+    return;
+  }
 
   // Create the terrain
   Terrain = chrono_types::make_shared<UERayCastTerrain>(CarlaVehicle, Vehicle.get());
@@ -164,7 +171,7 @@ void UChronoMovementComponent::BeginPlay()
       ECollisionChannel::ECC_WorldStatic, ECollisionResponse::ECR_Overlap);
 }
 
-void UChronoMovementComponent::InitializeChronoVehicle()
+bool UChronoMovementComponent::InitializeChronoVehicle()
 {
   // Initial location with small offset to prevent falling through the ground
   FVector VehicleLocation = CarlaVehicle->GetActorLocation() + FVector(0,0,25);
@@ -196,6 +203,23 @@ void UChronoMovementComponent::InitializeChronoVehicle()
       *VehicleJSONPath,
       *PowerTrainJSONPath,
       *TireJSONPath);
+
+  if (!FPaths::FileExists(VehicleJSONPath))
+  {
+    UE_LOG(LogCarla, Error, TEXT("Error: Chrono vehicle JSON file does not exist: %s"), *VehicleJSONPath);
+    return false;
+  }
+  if (!FPaths::FileExists(PowerTrainJSONPath))
+  {
+    UE_LOG(LogCarla, Error, TEXT("Error: Chrono powertrain JSON file does not exist: %s"), *PowerTrainJSONPath);
+    return false;
+  }
+  if (!FPaths::FileExists(TireJSONPath))
+  {
+    UE_LOG(LogCarla, Error, TEXT("Error: Chrono tire JSON file does not exist: %s"), *TireJSONPath);
+    return false;
+  }
+
   // Create JSON vehicle
   Vehicle = chrono_types::make_shared<WheeledVehicle>(
       &Sys,
@@ -213,6 +237,8 @@ void UChronoMovementComponent::InitializeChronoVehicle()
           Vehicle->InitializeTire(tire, wheel, VisualizationType::MESH);
       }
   }
+
+  return true;
 }
 
 void UChronoMovementComponent::ProcessControl(FVehicleControl &Control)

@@ -82,7 +82,7 @@ public:
   #ifdef WITH_CHRONO
   virtual void BeginPlay() override;
 
-  void InitializeChronoVehicle();
+  bool InitializeChronoVehicle();
 
   void ProcessControl(FVehicleControl &Control) override;
 
