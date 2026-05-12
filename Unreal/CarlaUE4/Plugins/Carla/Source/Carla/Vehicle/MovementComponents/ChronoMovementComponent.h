@@ -11,6 +11,8 @@
 #include "Carla/Vehicle/VehicleControl.h"
 
 #ifdef WITH_CHRONO
+#include <array>
+
 #include "compiler/disable-ue4-macros.h"
 
 #if defined(__clang__)
@@ -34,6 +36,14 @@
 #include "ChronoMovementComponent.generated.h"
 
 #ifdef WITH_CHRONO
+class FChronoMutableTSDAForce;
+
+namespace chrono {
+namespace vehicle {
+class ChDoubleWishbone;
+}
+}
+
 class UERayCastTerrain : public chrono::vehicle::ChTerrain
 {
   ACarlaWheeledVehicle* CarlaVehicle;
@@ -101,7 +111,22 @@ public:
   virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
   #endif
 
+  bool SetChronoSuspensionDamping(const TArray<float>& Damping);
+
+  bool SetChronoSuspensionStiffness(const TArray<float>& Stiffness);
+
 private:
+
+#ifdef WITH_CHRONO
+  std::array<std::shared_ptr<FChronoMutableTSDAForce>, 4> ChronoSpringForceFunctors;
+  std::array<std::shared_ptr<FChronoMutableTSDAForce>, 4> ChronoDamperForceFunctors;
+
+  std::shared_ptr<chrono::vehicle::ChDoubleWishbone> GetChronoDoubleWishboneSuspension(int32 AxleIndex) const;
+
+  bool ApplyChronoSuspensionValues(const TArray<float>& Values, bool bUseSpring);
+
+  void ResetChronoSuspensionForceFunctors();
+#endif
 
   void DisableChronoPhysics();
 

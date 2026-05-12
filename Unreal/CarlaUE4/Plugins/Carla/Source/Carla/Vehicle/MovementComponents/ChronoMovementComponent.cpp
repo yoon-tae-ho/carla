@@ -13,7 +13,9 @@
 #include "compiler/disable-ue4-macros.h"
 #include <carla/rpc/String.h>
 #ifdef WITH_CHRONO
+#include "chrono/physics/ChLinkTSDA.h"
 #include "chrono_vehicle/utils/ChUtilsJSON.h"
+#include "chrono_vehicle/wheeled_vehicle/suspension/ChDoubleWishbone.h"
 #endif
 #include "compiler/enable-ue4-macros.h"
 #include "Carla/Util/RayTracer.h"
@@ -57,8 +59,66 @@ void UChronoMovementComponent::CreateChronoMovementComponent(
 
 #ifdef WITH_CHRONO
 
+class FChronoMutableTSDAForce : public chrono::ChLinkTSDA::ForceFunctor
+{
+public:
+  enum class EMode
+  {
+    SpringStiffness,
+    ShockDamping
+  };
+
+  FChronoMutableTSDAForce(EMode InMode, double InCoefficient)
+    : Mode(InMode),
+      Coefficient(InCoefficient) {}
+
+  void SetCoefficient(double InCoefficient)
+  {
+    Coefficient = InCoefficient;
+  }
+
+  virtual double operator()(
+      double time,
+      double rest_length,
+      double length,
+      double vel,
+      chrono::ChLinkTSDA* link) override
+  {
+    if (Mode == EMode::SpringStiffness)
+    {
+      return -Coefficient * (length - rest_length);
+    }
+    return -Coefficient * vel;
+  }
+
+private:
+  EMode Mode;
+  double Coefficient;
+};
+
 using namespace chrono;
 using namespace chrono::vehicle;
+
+namespace {
+
+constexpr int32 ChronoSuspensionValueCount = 4;
+
+struct FChronoSuspensionCorner
+{
+  int32 AxleIndex;
+  VehicleSide Side;
+  const TCHAR* Label;
+};
+
+const FChronoSuspensionCorner ChronoSuspensionCorners[ChronoSuspensionValueCount] =
+{
+  {0, LEFT, TEXT("FL")},
+  {0, RIGHT, TEXT("FR")},
+  {1, LEFT, TEXT("RL")},
+  {1, RIGHT, TEXT("RR")}
+};
+
+} // namespace
 
 constexpr double CMTOM = 0.01;
 ChVector<> UE4LocationToChrono(const FVector& Location)
@@ -221,6 +281,7 @@ bool UChronoMovementComponent::InitializeChronoVehicle()
   }
 
   // Create JSON vehicle
+  ResetChronoSuspensionForceFunctors();
   Vehicle = chrono_types::make_shared<WheeledVehicle>(
       &Sys,
       VehiclePath_string);
@@ -239,6 +300,130 @@ bool UChronoMovementComponent::InitializeChronoVehicle()
   }
 
   return true;
+}
+
+bool UChronoMovementComponent::SetChronoSuspensionDamping(const TArray<float>& Damping)
+{
+  return ApplyChronoSuspensionValues(Damping, false);
+}
+
+bool UChronoMovementComponent::SetChronoSuspensionStiffness(const TArray<float>& Stiffness)
+{
+  return ApplyChronoSuspensionValues(Stiffness, true);
+}
+
+std::shared_ptr<ChDoubleWishbone>
+    UChronoMovementComponent::GetChronoDoubleWishboneSuspension(int32 AxleIndex) const
+{
+  if (!Vehicle)
+  {
+    UE_LOG(LogCarla, Warning, TEXT("Chrono suspension control requested before vehicle initialization."));
+    return nullptr;
+  }
+
+  const auto& Axles = Vehicle->GetAxles();
+  if (AxleIndex < 0 || static_cast<size_t>(AxleIndex) >= Axles.size())
+  {
+    UE_LOG(LogCarla, Warning, TEXT("Chrono suspension axle index %d is unavailable."), AxleIndex);
+    return nullptr;
+  }
+
+  auto Suspension = Vehicle->GetSuspension(AxleIndex);
+  auto DoubleWishbone = std::dynamic_pointer_cast<ChDoubleWishbone>(Suspension);
+  if (!DoubleWishbone)
+  {
+    UE_LOG(LogCarla, Warning, TEXT("Chrono suspension axle %d is not a DoubleWishbone suspension."), AxleIndex);
+    return nullptr;
+  }
+
+  return DoubleWishbone;
+}
+
+bool UChronoMovementComponent::ApplyChronoSuspensionValues(
+    const TArray<float>& Values,
+    bool bUseSpring)
+{
+  const TCHAR* ValueName = bUseSpring ? TEXT("stiffness") : TEXT("damping");
+  if (Values.Num() != ChronoSuspensionValueCount)
+  {
+    UE_LOG(LogCarla, Warning, TEXT("Chrono suspension %s expects %d values in FL/FR/RL/RR order."),
+        ValueName,
+        ChronoSuspensionValueCount);
+    return false;
+  }
+
+  for (int32 Index = 0; Index < ChronoSuspensionValueCount; ++Index)
+  {
+    if (!FMath::IsFinite(Values[Index]) || Values[Index] < 0.0f)
+    {
+      UE_LOG(LogCarla, Warning, TEXT("Invalid Chrono suspension %s value for %s: %f."),
+          ValueName,
+          ChronoSuspensionCorners[Index].Label,
+          Values[Index]);
+      return false;
+    }
+  }
+
+  std::array<std::shared_ptr<ChDoubleWishbone>, 2> Suspensions =
+  {
+    GetChronoDoubleWishboneSuspension(0),
+    GetChronoDoubleWishboneSuspension(1)
+  };
+
+  if (!Suspensions[0] || !Suspensions[1])
+  {
+    return false;
+  }
+
+  std::array<std::shared_ptr<ChLinkTSDA>, ChronoSuspensionValueCount> Links;
+  for (int32 Index = 0; Index < ChronoSuspensionValueCount; ++Index)
+  {
+    const auto& Corner = ChronoSuspensionCorners[Index];
+    Links[Index] = bUseSpring ?
+        Suspensions[Corner.AxleIndex]->GetSpring(Corner.Side) :
+        Suspensions[Corner.AxleIndex]->GetShock(Corner.Side);
+    if (!Links[Index])
+    {
+      UE_LOG(LogCarla, Warning, TEXT("Chrono suspension %s link is unavailable for %s."),
+          bUseSpring ? TEXT("spring") : TEXT("shock"),
+          Corner.Label);
+      return false;
+    }
+  }
+
+  for (int32 Index = 0; Index < ChronoSuspensionValueCount; ++Index)
+  {
+    auto& Functor = bUseSpring ?
+        ChronoSpringForceFunctors[Index] :
+        ChronoDamperForceFunctors[Index];
+    if (!Functor)
+    {
+      Functor = std::make_shared<FChronoMutableTSDAForce>(
+          bUseSpring ?
+              FChronoMutableTSDAForce::EMode::SpringStiffness :
+              FChronoMutableTSDAForce::EMode::ShockDamping,
+          Values[Index]);
+    }
+    else
+    {
+      Functor->SetCoefficient(Values[Index]);
+    }
+    Links[Index]->RegisterForceFunctor(Functor);
+  }
+
+  return true;
+}
+
+void UChronoMovementComponent::ResetChronoSuspensionForceFunctors()
+{
+  for (auto& Functor : ChronoSpringForceFunctors)
+  {
+    Functor.reset();
+  }
+  for (auto& Functor : ChronoDamperForceFunctors)
+  {
+    Functor.reset();
+  }
 }
 
 void UChronoMovementComponent::ProcessControl(FVehicleControl &Control)
@@ -371,6 +556,18 @@ void UChronoMovementComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
       this, &UChronoMovementComponent::OnVehicleOverlap);
   CarlaVehicle->GetMesh()->SetCollisionResponseToChannel(
       ECollisionChannel::ECC_WorldStatic, ECollisionResponse::ECR_Block);
+}
+#else
+bool UChronoMovementComponent::SetChronoSuspensionDamping(const TArray<float>& Damping)
+{
+  UE_LOG(LogCarla, Warning, TEXT("Chrono suspension damping control requested, but Chrono is not enabled."));
+  return false;
+}
+
+bool UChronoMovementComponent::SetChronoSuspensionStiffness(const TArray<float>& Stiffness)
+{
+  UE_LOG(LogCarla, Warning, TEXT("Chrono suspension stiffness control requested, but Chrono is not enabled."));
+  return false;
 }
 #endif
 
