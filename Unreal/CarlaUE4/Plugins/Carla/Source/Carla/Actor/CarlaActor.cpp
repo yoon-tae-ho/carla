@@ -14,7 +14,6 @@
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Carla/Game/Tagger.h"
 #include "Carla/Vehicle/MovementComponents/CarSimManagerComponent.h"
-#include "Carla/Vehicle/MovementComponents/ChronoMovementComponent.h"
 #include "Carla/Traffic/TrafficLightBase.h"
 #include "Carla/Game/CarlaStatics.h"
 #include "Components/CapsuleComponent.h"
@@ -25,6 +24,7 @@
 #include <carla/rpc/LightState.h>
 #include <carla/rpc/MapInfo.h>
 #include <carla/rpc/MapLayer.h>
+#include <carla/rpc/ChronoSuspensionControl.h>
 #include <carla/rpc/VehicleAckermannControl.h>
 #include <carla/rpc/VehicleControl.h>
 #include <carla/rpc/VehiclePhysicsControl.h>
@@ -1043,8 +1043,7 @@ ECarlaServerResponse FVehicleActor::EnableChronoPhysics(
     {
       return ECarlaServerResponse::NotAVehicle;
     }
-    UChronoMovementComponent::CreateChronoMovementComponent(
-        Vehicle,
+    Vehicle->EnableChronoPhysics(
         MaxSubsteps,
         MaxSubstepDeltaTime,
         VehicleJSON,
@@ -1052,6 +1051,52 @@ ECarlaServerResponse FVehicleActor::EnableChronoPhysics(
         TireJSON,
         BaseJSONPath);
   }
+  return ECarlaServerResponse::Success;
+}
+
+ECarlaServerResponse FVehicleActor::ApplyChronoSuspensionControl(
+      const carla::rpc::ChronoSuspensionControl& Control)
+{
+  if (IsDormant())
+  {
+    return ECarlaServerResponse::FunctionNotAvailiableWhenDormant;
+  }
+
+  auto Vehicle = Cast<ACarlaWheeledVehicle>(GetActor());
+  if (Vehicle == nullptr)
+  {
+    return ECarlaServerResponse::NotAVehicle;
+  }
+
+  if (!Vehicle->HasChronoMovementComponent())
+  {
+    return ECarlaServerResponse::ChronoPhysicsNotEnabled;
+  }
+
+  if (!Control.IsValid())
+  {
+    return ECarlaServerResponse::ChronoSuspensionControlFailed;
+  }
+
+  TArray<float> Damping;
+  Damping.Reserve(4);
+  Damping.Add(Control.damping_fl);
+  Damping.Add(Control.damping_fr);
+  Damping.Add(Control.damping_rl);
+  Damping.Add(Control.damping_rr);
+
+  TArray<float> Stiffness;
+  Stiffness.Reserve(4);
+  Stiffness.Add(Control.stiffness_fl);
+  Stiffness.Add(Control.stiffness_fr);
+  Stiffness.Add(Control.stiffness_rl);
+  Stiffness.Add(Control.stiffness_rr);
+
+  if (!Vehicle->ApplyChronoSuspensionControl(Damping, Stiffness))
+  {
+    return ECarlaServerResponse::ChronoSuspensionControlFailed;
+  }
+
   return ECarlaServerResponse::Success;
 }
 

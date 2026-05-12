@@ -5,6 +5,7 @@ This guide outlines what Chrono is, how to use it in CARLA, and the limitations 
 - [__Project Chrono__](#project-chrono)
 - [__Using Chrono on CARLA__](#using-chrono-on-carla)
     - [Configuring the server](#configuring-the-server)
+    - [Build note for source builds](#build-note-for-source-builds)
     - [Enabling Chrono physics](#enabling-chrono-physics)
 - [__Limitations__](#limitations)
 
@@ -29,6 +30,25 @@ __In the build from source version of CARLA__, run the following command to star
 ```sh
 make launch ARGS="--chrono"
 ```
+
+### Build note for source builds
+
+When building CARLA from a clean checkout, Chrono requires the Eigen 3.3.7
+headers in `Unreal/CarlaUE4/Plugins/Carla/CarlaDependencies/include`.
+Some build steps, such as `make LibCarla.server.release`, may refresh
+`CarlaDependencies` with CARLA's default Eigen headers. If the Chrono build
+fails with Eigen errors such as missing `Eigen::Ref`, restore the Chrono Eigen
+headers before building Unreal with Chrono:
+
+```sh
+cp -p -r Build/eigen-3.3.7-install/include/* \
+  Unreal/CarlaUE4/Plugins/Carla/CarlaDependencies/include/
+./Util/BuildTools/BuildCarlaUE4.sh --build --chrono
+```
+
+`CarlaDependencies` is intentionally ignored by Git because it contains
+generated dependency artifacts. Keep this step in the build procedure rather
+than committing the copied dependency files.
 
 ---
 

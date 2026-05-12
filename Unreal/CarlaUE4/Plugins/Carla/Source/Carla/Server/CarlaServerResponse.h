@@ -20,6 +20,8 @@ enum class ECarlaServerResponse
   WalkerIncompatibleController,
   AutoPilotNotSupported,
   CarSimPluginNotEnabled,
+  ChronoPhysicsNotEnabled,
+  ChronoSuspensionControlFailed,
   NotATrafficLight,
   FunctionNotAvailiableWhenDormant
 };

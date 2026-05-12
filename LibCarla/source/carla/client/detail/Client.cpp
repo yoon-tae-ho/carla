@@ -475,6 +475,12 @@ namespace detail {
         BaseJSONPath);
   }
 
+  void Client::ApplyChronoSuspensionControl(
+      rpc::ActorId vehicle,
+      const rpc::ChronoSuspensionControl &control) {
+    _pimpl->CallAndWait<void>("apply_chrono_suspension_control", vehicle, control);
+  }
+
   void Client::ApplyControlToWalker(rpc::ActorId walker, const rpc::WalkerControl &control) {
     _pimpl->AsyncCall("apply_control_to_walker", walker, control);
   }

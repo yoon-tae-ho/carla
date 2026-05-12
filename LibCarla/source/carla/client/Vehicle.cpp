@@ -144,6 +144,10 @@ namespace client {
         BaseJSONPath);
   }
 
+  void Vehicle::ApplyChronoSuspensionControl(const ChronoSuspensionControl &control) {
+    GetEpisode().Lock()->ApplyChronoSuspensionControl(*this, control);
+  }
+
   rpc::VehicleFailureState Vehicle::GetFailureState() const {
     return GetEpisode().Lock()->GetActorSnapshot(*this).state.vehicle_data.failure_state;
   }

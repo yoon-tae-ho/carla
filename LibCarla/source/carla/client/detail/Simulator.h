@@ -572,6 +572,12 @@ namespace detail {
           BaseJSONPath);
     }
 
+    void ApplyChronoSuspensionControl(
+        Vehicle &vehicle,
+        const rpc::ChronoSuspensionControl &control) {
+      _client.ApplyChronoSuspensionControl(vehicle.GetId(), control);
+    }
+
     /// @}
     // =========================================================================
     /// @name Operations with the recorder

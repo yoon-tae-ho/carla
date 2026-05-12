@@ -9,11 +9,13 @@
 #include <carla/client/Vehicle.h>
 #include <carla/client/Walker.h>
 #include <carla/client/WalkerAIController.h>
+#include <carla/rpc/ChronoSuspensionControl.h>
 #include <carla/rpc/TrafficLightState.h>
 #include <carla/trafficmanager/TrafficManager.h>
 
 #include <boost/python/suite/indexing/vector_indexing_suite.hpp>
 
+#include <cmath>
 #include <ostream>
 #include <iostream>
 
@@ -70,6 +72,65 @@ static auto GetLightBoxes(const carla::client::TrafficLight &self) {
     result.append(bb);
   }
   return result;
+}
+
+static float GetChronoSuspensionValue(
+    const boost::python::list &values,
+    boost::python::ssize_t index,
+    const char *field_name) {
+  boost::python::extract<float> extractor(values[index]);
+  if (!extractor.check()) {
+    PyErr_Format(
+        PyExc_TypeError,
+        "%s[%d] must be a float",
+        field_name,
+        static_cast<int>(index));
+    boost::python::throw_error_already_set();
+  }
+
+  float value = extractor();
+  if (!std::isfinite(value) || value < 0.0f) {
+    PyErr_Format(
+        PyExc_ValueError,
+        "%s[%d] must be finite and non-negative",
+        field_name,
+        static_cast<int>(index));
+    boost::python::throw_error_already_set();
+  }
+  return value;
+}
+
+static carla::rpc::ChronoSuspensionControl MakeChronoSuspensionControl(
+    const boost::python::list &damping,
+    const boost::python::list &stiffness) {
+  constexpr boost::python::ssize_t expected_size = 4;
+  if (boost::python::len(damping) != expected_size) {
+    PyErr_SetString(PyExc_ValueError, "damping must contain 4 values in FL/FR/RL/RR order");
+    boost::python::throw_error_already_set();
+  }
+  if (boost::python::len(stiffness) != expected_size) {
+    PyErr_SetString(PyExc_ValueError, "stiffness must contain 4 values in FL/FR/RL/RR order");
+    boost::python::throw_error_already_set();
+  }
+
+  return carla::rpc::ChronoSuspensionControl(
+      GetChronoSuspensionValue(damping, 0, "damping"),
+      GetChronoSuspensionValue(damping, 1, "damping"),
+      GetChronoSuspensionValue(damping, 2, "damping"),
+      GetChronoSuspensionValue(damping, 3, "damping"),
+      GetChronoSuspensionValue(stiffness, 0, "stiffness"),
+      GetChronoSuspensionValue(stiffness, 1, "stiffness"),
+      GetChronoSuspensionValue(stiffness, 2, "stiffness"),
+      GetChronoSuspensionValue(stiffness, 3, "stiffness"));
+}
+
+static void ApplyChronoSuspensionControl(
+    carla::client::Vehicle &self,
+    boost::python::list damping,
+    boost::python::list stiffness) {
+  auto control = MakeChronoSuspensionControl(damping, stiffness);
+  carla::PythonUtil::ReleaseGIL unlock;
+  self.ApplyChronoSuspensionControl(control);
 }
 
 void export_actor() {
@@ -194,6 +255,7 @@ void export_actor() {
       .def("enable_carsim", &cc::Vehicle::EnableCarSim, (arg("simfile_path") = ""))
       .def("use_carsim_road", &cc::Vehicle::UseCarSimRoad, (arg("enabled")))
       .def("enable_chrono_physics", &cc::Vehicle::EnableChronoPhysics, (arg("max_substeps")=30, arg("max_substep_delta_time")=0.002, arg("vehicle_json")="", arg("powetrain_json")="", arg("tire_json")="", arg("base_json_path")=""))
+      .def("apply_chrono_suspension_control", &ApplyChronoSuspensionControl, (arg("damping"), arg("stiffness")))
       .def("get_failure_state", &cc::Vehicle::GetFailureState)
       .def(self_ns::str(self_ns::self))
   ;

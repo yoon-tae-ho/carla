@@ -292,6 +292,20 @@ public:
 
   void SetCarlaMovementComponent(UBaseCarlaMovementComponent* MoementComponent);
 
+  void EnableChronoPhysics(
+      uint64_t MaxSubsteps,
+      float MaxSubstepDeltaTime,
+      const FString& VehicleJSON,
+      const FString& PowertrainJSON,
+      const FString& TireJSON,
+      const FString& BaseJSONPath);
+
+  bool HasChronoMovementComponent() const;
+
+  bool ApplyChronoSuspensionControl(
+      const TArray<float>& Damping,
+      const TArray<float>& Stiffness);
+
   template<typename T = UBaseCarlaMovementComponent>
   T* GetCarlaMovementComponent() const
   {

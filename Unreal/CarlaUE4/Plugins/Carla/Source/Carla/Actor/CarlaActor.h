@@ -19,6 +19,12 @@
 
 class AActor;
 
+namespace carla {
+namespace rpc {
+class ChronoSuspensionControl;
+}
+}
+
 /// A view over an actor and its properties.
 class FCarlaActor
 {
@@ -343,6 +349,12 @@ public:
     return ECarlaServerResponse::ActorTypeMismatch;
   }
 
+  virtual ECarlaServerResponse ApplyChronoSuspensionControl(
+      const carla::rpc::ChronoSuspensionControl&)
+  {
+    return ECarlaServerResponse::ActorTypeMismatch;
+  }
+
   // Traffic light functions
 
   virtual ECarlaServerResponse SetTrafficLightState(const ETrafficLightState&)
@@ -532,6 +544,9 @@ public:
       uint64_t MaxSubsteps, float MaxSubstepDeltaTime,
       const FString& VehicleJSON, const FString& PowertrainJSON,
       const FString& TireJSON, const FString& BaseJSONPath) final;
+
+  virtual ECarlaServerResponse ApplyChronoSuspensionControl(
+      const carla::rpc::ChronoSuspensionControl& Control) final;
 };
 
 class FSensorActor : public FCarlaActor

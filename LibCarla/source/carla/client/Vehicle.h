@@ -8,6 +8,7 @@
 
 #include "carla/client/Actor.h"
 #include "carla/rpc/AckermannControllerSettings.h"
+#include "carla/rpc/ChronoSuspensionControl.h"
 #include "carla/rpc/TrafficLightState.h"
 #include "carla/rpc/VehicleAckermannControl.h"
 #include "carla/rpc/VehicleControl.h"
@@ -35,6 +36,7 @@ namespace client {
     using Control = rpc::VehicleControl;
     using AckermannControl = rpc::VehicleAckermannControl;
     using PhysicsControl = rpc::VehiclePhysicsControl;
+    using ChronoSuspensionControl = rpc::ChronoSuspensionControl;
     using LightState = rpc::VehicleLightState::LightState;
     using TM = traffic_manager::TrafficManager;
     using VehicleDoor = rpc::VehicleDoor;
@@ -136,6 +138,8 @@ namespace client {
         std::string PowertrainJSON = "",
         std::string TireJSON = "",
         std::string BaseJSONPath = "");
+
+    void ApplyChronoSuspensionControl(const ChronoSuspensionControl &control);
 
     /// Returns the failure state of the vehicle
     rpc::VehicleFailureState GetFailureState() const;

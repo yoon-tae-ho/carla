@@ -14,6 +14,7 @@
 #include "carla/rpc/Actor.h"
 #include "carla/rpc/ActorDefinition.h"
 #include "carla/rpc/AttachmentType.h"
+#include "carla/rpc/ChronoSuspensionControl.h"
 #include "carla/rpc/Command.h"
 #include "carla/rpc/CommandResponse.h"
 #include "carla/rpc/EnvironmentObject.h"
@@ -296,6 +297,10 @@ namespace detail {
         std::string PowertrainJSON,
         std::string TireJSON,
         std::string BaseJSONPath);
+
+    void ApplyChronoSuspensionControl(
+        rpc::ActorId vehicle,
+        const rpc::ChronoSuspensionControl &control);
 
     void ApplyControlToWalker(
         rpc::ActorId walker,
