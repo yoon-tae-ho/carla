@@ -648,6 +648,7 @@ def run_experiment(args):
 
         chrono_active = True
         chrono_error = None
+        chrono_inactive_reason = None
         completed_ticks = 0
 
         for step in range(args.ticks):
@@ -670,11 +671,12 @@ def run_experiment(args):
                 except RuntimeError as error:
                     chrono_active = False
                     chrono_error = str(error)
+                    chrono_inactive_reason = 'suspension command failed: %s' % chrono_error
                     logging.error('Chrono suspension command failed at step %d: %s', step, chrono_error)
                     if args.stop_on_chrono_error:
                         break
             else:
-                chrono_error = 'skipped because a previous suspension command failed'
+                chrono_error = chrono_inactive_reason or 'Chrono disabled before suspension command'
 
             vehicle.apply_control(planner_output.control)
             frame = world.tick()
@@ -684,6 +686,8 @@ def run_experiment(args):
 
             if collision_events:
                 chrono_active = False
+                chrono_inactive_reason = 'Chrono disabled after collision/fallback'
+                chrono_error = chrono_inactive_reason
                 logging.warning(
                     'collision detected at frame %d; Chrono may have fallen back to default physics',
                     snapshot.frame)
