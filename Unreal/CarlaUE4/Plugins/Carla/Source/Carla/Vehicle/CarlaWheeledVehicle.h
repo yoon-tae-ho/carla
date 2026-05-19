@@ -16,6 +16,7 @@
 #include "Vehicle/VehicleLightState.h"
 #include "Vehicle/VehicleInputPriority.h"
 #include "Vehicle/VehiclePhysicsControl.h"
+#include "Vehicle/SuspensionPhysicsControl.h"
 #include "VehicleVelocityControl.h"
 #include "WheeledVehicleMovementComponent4W.h"
 #include "WheeledVehicleMovementComponentNW.h"
@@ -166,6 +167,9 @@ public:
   FVehiclePhysicsControl GetVehiclePhysicsControl() const;
 
   UFUNCTION(Category = "CARLA Wheeled Vehicle", BlueprintCallable)
+  FSuspensionPhysicsControl GetSuspensionPhysicsControl() const;
+
+  UFUNCTION(Category = "CARLA Wheeled Vehicle", BlueprintCallable)
   FAckermannControllerSettings GetAckermannControllerSettings() const {
     return AckermannController.GetSettings();
   }
@@ -177,6 +181,8 @@ public:
   FVehicleLightState GetVehicleLightState() const;
 
   void ApplyVehiclePhysicsControl(const FVehiclePhysicsControl &PhysicsControl);
+
+  bool ApplySuspensionPhysicsControl(const FSuspensionPhysicsControl &Control);
 
   void ApplyAckermannControllerSettings(const FAckermannControllerSettings &AckermannControllerSettings) {
     return AckermannController.ApplySettings(AckermannControllerSettings);

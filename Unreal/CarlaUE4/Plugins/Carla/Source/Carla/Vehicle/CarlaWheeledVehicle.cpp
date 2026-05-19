@@ -49,6 +49,99 @@ ACarlaWheeledVehicle::ACarlaWheeledVehicle(const FObjectInitializer& ObjectIniti
 
 ACarlaWheeledVehicle::~ACarlaWheeledVehicle() {}
 
+namespace {
+
+constexpr int32 RuntimeSuspensionWheelCount = 4;
+
+FWheelSuspensionPhysicsControl MakeWheelSuspensionPhysicsControl(
+    const PxVehicleSuspensionData &SuspensionData)
+{
+  FWheelSuspensionPhysicsControl Control;
+  Control.SpringStrength = SuspensionData.mSpringStrength;
+  Control.SpringDamperRate = SuspensionData.mSpringDamperRate;
+  Control.MaxCompression = SuspensionData.mMaxCompression;
+  Control.MaxDroop = SuspensionData.mMaxDroop;
+  Control.SprungMass = SuspensionData.mSprungMass;
+  return Control;
+}
+
+bool IsFiniteSuspensionValue(float Value, const TCHAR *Name, int32 WheelIndex)
+{
+  if (!FMath::IsFinite(Value))
+  {
+    UE_LOG(
+        LogCarla,
+        Warning,
+        TEXT("Invalid SuspensionPhysicsControl: wheel %d has non-finite %s."),
+        WheelIndex,
+        Name);
+    return false;
+  }
+  return true;
+}
+
+bool IsValidSuspensionWheelControl(
+    const FWheelSuspensionPhysicsControl &Wheel,
+    int32 WheelIndex)
+{
+  if (!IsFiniteSuspensionValue(Wheel.SpringStrength, TEXT("SpringStrength"), WheelIndex) ||
+      !IsFiniteSuspensionValue(Wheel.SpringDamperRate, TEXT("SpringDamperRate"), WheelIndex) ||
+      !IsFiniteSuspensionValue(Wheel.MaxCompression, TEXT("MaxCompression"), WheelIndex) ||
+      !IsFiniteSuspensionValue(Wheel.MaxDroop, TEXT("MaxDroop"), WheelIndex) ||
+      !IsFiniteSuspensionValue(Wheel.SprungMass, TEXT("SprungMass"), WheelIndex))
+  {
+    return false;
+  }
+
+  if (Wheel.SpringStrength <= 0.0f)
+  {
+    UE_LOG(
+        LogCarla,
+        Warning,
+        TEXT("Invalid SuspensionPhysicsControl: wheel %d SpringStrength must be positive."),
+        WheelIndex);
+    return false;
+  }
+
+  if (Wheel.SpringDamperRate <= 0.0f)
+  {
+    UE_LOG(
+        LogCarla,
+        Warning,
+        TEXT("Invalid SuspensionPhysicsControl: wheel %d SpringDamperRate must be positive."),
+        WheelIndex);
+    return false;
+  }
+
+  return true;
+}
+
+bool IsValidSuspensionPhysicsControl(const FSuspensionPhysicsControl &Control)
+{
+  if (Control.Wheels.Num() != RuntimeSuspensionWheelCount)
+  {
+    UE_LOG(
+        LogCarla,
+        Warning,
+        TEXT("Invalid SuspensionPhysicsControl: expected %d wheels, got %d."),
+        RuntimeSuspensionWheelCount,
+        Control.Wheels.Num());
+    return false;
+  }
+
+  for (int32 i = 0; i < Control.Wheels.Num(); ++i)
+  {
+    if (!IsValidSuspensionWheelControl(Control.Wheels[i], i))
+    {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+} // namespace
+
 void ACarlaWheeledVehicle::SetWheelCollision(UWheeledVehicleMovementComponent4W *Vehicle4W,
     const FVehiclePhysicsControl &PhysicsControl ) {
 
@@ -561,6 +654,71 @@ FVehiclePhysicsControl ACarlaWheeledVehicle::GetVehiclePhysicsControl() const
   return PhysicsControl;
 }
 
+FSuspensionPhysicsControl ACarlaWheeledVehicle::GetSuspensionPhysicsControl() const
+{
+  FSuspensionPhysicsControl Control;
+
+  if (!bIsNWVehicle) {
+    UWheeledVehicleMovementComponent4W *Vehicle4W = Cast<UWheeledVehicleMovementComponent4W>(
+          GetVehicleMovement());
+    if (Vehicle4W == nullptr || Vehicle4W->PVehicle == nullptr)
+    {
+      UE_LOG(LogCarla, Warning, TEXT("Unable to read suspension physics control from 4W vehicle."));
+      return Control;
+    }
+
+    const int32 PhysicsWheelsNum =
+        static_cast<int32>(Vehicle4W->PVehicle->mWheelsSimData.getNbWheels());
+    if (PhysicsWheelsNum != RuntimeSuspensionWheelCount)
+    {
+      UE_LOG(
+          LogCarla,
+          Warning,
+          TEXT("Unable to read suspension physics control: expected %d wheels, got %d."),
+          RuntimeSuspensionWheelCount,
+          PhysicsWheelsNum);
+      return Control;
+    }
+
+    for (int32 i = 0; i < RuntimeSuspensionWheelCount; ++i)
+    {
+      const PxVehicleSuspensionData SuspensionData =
+          Vehicle4W->PVehicle->mWheelsSimData.getSuspensionData(i);
+      Control.Wheels.Add(MakeWheelSuspensionPhysicsControl(SuspensionData));
+    }
+  } else {
+    UWheeledVehicleMovementComponentNW *VehicleNW = Cast<UWheeledVehicleMovementComponentNW>(
+      GetVehicleMovement());
+    if (VehicleNW == nullptr || VehicleNW->PVehicle == nullptr)
+    {
+      UE_LOG(LogCarla, Warning, TEXT("Unable to read suspension physics control from NW vehicle."));
+      return Control;
+    }
+
+    const int32 PhysicsWheelsNum =
+        static_cast<int32>(VehicleNW->PVehicle->mWheelsSimData.getNbWheels());
+    if (PhysicsWheelsNum != RuntimeSuspensionWheelCount)
+    {
+      UE_LOG(
+          LogCarla,
+          Warning,
+          TEXT("Unable to read suspension physics control: expected %d wheels, got %d."),
+          RuntimeSuspensionWheelCount,
+          PhysicsWheelsNum);
+      return Control;
+    }
+
+    for (int32 i = 0; i < RuntimeSuspensionWheelCount; ++i)
+    {
+      const PxVehicleSuspensionData SuspensionData =
+          VehicleNW->PVehicle->mWheelsSimData.getSuspensionData(i);
+      Control.Wheels.Add(MakeWheelSuspensionPhysicsControl(SuspensionData));
+    }
+  }
+
+  return Control;
+}
+
 FVehicleLightState ACarlaWheeledVehicle::GetVehicleLightState() const
 {
   return InputControl.LightState;
@@ -569,6 +727,93 @@ FVehicleLightState ACarlaWheeledVehicle::GetVehicleLightState() const
 void ACarlaWheeledVehicle::RestoreVehiclePhysicsControl()
 {
   ApplyVehiclePhysicsControl(LastPhysicsControl);
+}
+
+bool ACarlaWheeledVehicle::ApplySuspensionPhysicsControl(
+    const FSuspensionPhysicsControl &Control)
+{
+  if (!IsValidSuspensionPhysicsControl(Control))
+  {
+    return false;
+  }
+
+  UWorld *World = GetWorld();
+  if (World == nullptr || World->GetPhysicsScene() == nullptr ||
+      World->GetPhysicsScene()->GetPxScene() == nullptr)
+  {
+    UE_LOG(LogCarla, Warning, TEXT("Unable to apply suspension physics control: missing PhysX scene."));
+    return false;
+  }
+
+  auto *PxScene = World->GetPhysicsScene()->GetPxScene();
+
+  if (!bIsNWVehicle) {
+    UWheeledVehicleMovementComponent4W *Vehicle4W = Cast<UWheeledVehicleMovementComponent4W>(
+          GetVehicleMovement());
+    if (Vehicle4W == nullptr || Vehicle4W->PVehicle == nullptr)
+    {
+      UE_LOG(LogCarla, Warning, TEXT("Unable to apply suspension physics control to 4W vehicle."));
+      return false;
+    }
+
+    const int32 PhysicsWheelsNum =
+        static_cast<int32>(Vehicle4W->PVehicle->mWheelsSimData.getNbWheels());
+    if (PhysicsWheelsNum != RuntimeSuspensionWheelCount)
+    {
+      UE_LOG(
+          LogCarla,
+          Warning,
+          TEXT("Unable to apply suspension physics control: expected %d wheels, got %d."),
+          RuntimeSuspensionWheelCount,
+          PhysicsWheelsNum);
+      return false;
+    }
+
+    PxScene->lockWrite();
+    for (int32 i = 0; i < RuntimeSuspensionWheelCount; ++i)
+    {
+      PxVehicleSuspensionData SuspensionData =
+          Vehicle4W->PVehicle->mWheelsSimData.getSuspensionData(i);
+      SuspensionData.mSpringStrength = Control.Wheels[i].SpringStrength;
+      SuspensionData.mSpringDamperRate = Control.Wheels[i].SpringDamperRate;
+      Vehicle4W->PVehicle->mWheelsSimData.setSuspensionData(i, SuspensionData);
+    }
+    PxScene->unlockWrite();
+  } else {
+    UWheeledVehicleMovementComponentNW *VehicleNW = Cast<UWheeledVehicleMovementComponentNW>(
+          GetVehicleMovement());
+    if (VehicleNW == nullptr || VehicleNW->PVehicle == nullptr)
+    {
+      UE_LOG(LogCarla, Warning, TEXT("Unable to apply suspension physics control to NW vehicle."));
+      return false;
+    }
+
+    const int32 PhysicsWheelsNum =
+        static_cast<int32>(VehicleNW->PVehicle->mWheelsSimData.getNbWheels());
+    if (PhysicsWheelsNum != RuntimeSuspensionWheelCount)
+    {
+      UE_LOG(
+          LogCarla,
+          Warning,
+          TEXT("Unable to apply suspension physics control: expected %d wheels, got %d."),
+          RuntimeSuspensionWheelCount,
+          PhysicsWheelsNum);
+      return false;
+    }
+
+    PxScene->lockWrite();
+    for (int32 i = 0; i < RuntimeSuspensionWheelCount; ++i)
+    {
+      PxVehicleSuspensionData SuspensionData =
+          VehicleNW->PVehicle->mWheelsSimData.getSuspensionData(i);
+      SuspensionData.mSpringStrength = Control.Wheels[i].SpringStrength;
+      SuspensionData.mSpringDamperRate = Control.Wheels[i].SpringDamperRate;
+      VehicleNW->PVehicle->mWheelsSimData.setSuspensionData(i, SuspensionData);
+    }
+    PxScene->unlockWrite();
+  }
+
+  return true;
 }
 
 void ACarlaWheeledVehicle::ApplyVehiclePhysicsControl(const FVehiclePhysicsControl &PhysicsControl)
