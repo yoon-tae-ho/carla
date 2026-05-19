@@ -1,0 +1,54 @@
+wall_time,label,event,frame,actor_id,type_id,role_name,apply_count,message
+1779187808.724214,A1,connected,,,,,,connected to CARLA
+1779187809.056301,A1,waiting_for_vehicle,110,,,,,no matching vehicle found
+1779187818.169538,A1,waiting_for_vehicle,119,,,,,no matching vehicle found
+1779187819.891174,A1,native_captured,122,138,vehicle.lincoln.mkz_2020,hero,0,captured native suspension
+1779187819.891259,A1,identity_applied,122,138,vehicle.lincoln.mkz_2020,hero,1,applied native suspension
+1779187824.909784,A1,runtime_error,,,,,,"time-out of 5000ms while waiting for the simulator, make sure the simulator is ready and connected to 127.0.0.1:2000"
+1779187839.966320,A1,identity_applied,170,138,vehicle.lincoln.mkz_2020,hero,50,applied native suspension
+1779187839.989010,A1,identity_verified,170,138,vehicle.lincoln.mkz_2020,hero,50,readback matched native
+1779187852.985483,A1,identity_applied,220,138,vehicle.lincoln.mkz_2020,hero,100,applied native suspension
+1779187852.986322,A1,identity_verified,220,138,vehicle.lincoln.mkz_2020,hero,100,readback matched native
+1779187866.356895,A1,identity_applied,270,138,vehicle.lincoln.mkz_2020,hero,150,applied native suspension
+1779187866.386514,A1,identity_verified,270,138,vehicle.lincoln.mkz_2020,hero,150,readback matched native
+1779187880.237736,A1,identity_applied,320,138,vehicle.lincoln.mkz_2020,hero,200,applied native suspension
+1779187880.264538,A1,identity_verified,320,138,vehicle.lincoln.mkz_2020,hero,200,readback matched native
+1779187893.380824,A1,identity_applied,370,138,vehicle.lincoln.mkz_2020,hero,250,applied native suspension
+1779187893.414190,A1,identity_verified,370,138,vehicle.lincoln.mkz_2020,hero,250,readback matched native
+1779187906.880699,A1,identity_applied,420,138,vehicle.lincoln.mkz_2020,hero,300,applied native suspension
+1779187906.903800,A1,identity_verified,420,138,vehicle.lincoln.mkz_2020,hero,300,readback matched native
+1779187921.650196,A1,identity_applied,470,138,vehicle.lincoln.mkz_2020,hero,350,applied native suspension
+1779187921.675967,A1,identity_verified,470,138,vehicle.lincoln.mkz_2020,hero,350,readback matched native
+1779187936.382903,A1,identity_applied,520,138,vehicle.lincoln.mkz_2020,hero,400,applied native suspension
+1779187936.402094,A1,identity_verified,520,138,vehicle.lincoln.mkz_2020,hero,400,readback matched native
+1779187952.163936,A1,identity_applied,570,138,vehicle.lincoln.mkz_2020,hero,450,applied native suspension
+1779187952.190617,A1,identity_verified,570,138,vehicle.lincoln.mkz_2020,hero,450,readback matched native
+1779187967.939913,A1,identity_applied,620,138,vehicle.lincoln.mkz_2020,hero,500,applied native suspension
+1779187967.981681,A1,identity_verified,620,138,vehicle.lincoln.mkz_2020,hero,500,readback matched native
+1779187984.662313,A1,identity_applied,670,138,vehicle.lincoln.mkz_2020,hero,550,applied native suspension
+1779187984.689502,A1,identity_verified,670,138,vehicle.lincoln.mkz_2020,hero,550,readback matched native
+1779188000.594266,A1,identity_applied,720,138,vehicle.lincoln.mkz_2020,hero,600,applied native suspension
+1779188000.619242,A1,identity_verified,720,138,vehicle.lincoln.mkz_2020,hero,600,readback matched native
+1779188015.976856,A1,identity_applied,770,138,vehicle.lincoln.mkz_2020,hero,650,applied native suspension
+1779188016.002993,A1,identity_verified,770,138,vehicle.lincoln.mkz_2020,hero,650,readback matched native
+1779188031.450893,A1,identity_applied,820,138,vehicle.lincoln.mkz_2020,hero,700,applied native suspension
+1779188031.474236,A1,identity_verified,820,138,vehicle.lincoln.mkz_2020,hero,700,readback matched native
+1779188046.692015,A1,identity_applied,870,138,vehicle.lincoln.mkz_2020,hero,750,applied native suspension
+1779188046.715158,A1,identity_verified,870,138,vehicle.lincoln.mkz_2020,hero,750,readback matched native
+1779188062.156943,A1,identity_applied,920,138,vehicle.lincoln.mkz_2020,hero,800,applied native suspension
+1779188062.181798,A1,identity_verified,920,138,vehicle.lincoln.mkz_2020,hero,800,readback matched native
+1779188077.692947,A1,identity_applied,970,138,vehicle.lincoln.mkz_2020,hero,850,applied native suspension
+1779188077.720129,A1,identity_verified,970,138,vehicle.lincoln.mkz_2020,hero,850,readback matched native
+1779188093.022794,A1,identity_applied,1020,138,vehicle.lincoln.mkz_2020,hero,900,applied native suspension
+1779188093.049909,A1,identity_verified,1020,138,vehicle.lincoln.mkz_2020,hero,900,readback matched native
+1779188108.251962,A1,identity_applied,1070,138,vehicle.lincoln.mkz_2020,hero,950,applied native suspension
+1779188108.280138,A1,identity_verified,1070,138,vehicle.lincoln.mkz_2020,hero,950,readback matched native
+1779188122.963834,A1,identity_applied,1120,138,vehicle.lincoln.mkz_2020,hero,1000,applied native suspension
+1779188122.991585,A1,identity_verified,1120,138,vehicle.lincoln.mkz_2020,hero,1000,readback matched native
+1779188138.185137,A1,identity_applied,1170,138,vehicle.lincoln.mkz_2020,hero,1050,applied native suspension
+1779188138.211239,A1,identity_verified,1170,138,vehicle.lincoln.mkz_2020,hero,1050,readback matched native
+1779188153.357542,A1,identity_applied,1220,138,vehicle.lincoln.mkz_2020,hero,1100,applied native suspension
+1779188153.383932,A1,identity_verified,1220,138,vehicle.lincoln.mkz_2020,hero,1100,readback matched native
+1779188165.761694,A1,identity_applied,1270,138,vehicle.lincoln.mkz_2020,hero,1150,applied native suspension
+1779188165.781722,A1,identity_verified,1270,138,vehicle.lincoln.mkz_2020,hero,1150,readback matched native
+1779188176.319448,A1,stopped,,,,,,sidecar stopped

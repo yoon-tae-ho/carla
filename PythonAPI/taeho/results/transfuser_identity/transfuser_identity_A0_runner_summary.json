@@ -1,0 +1,20 @@
+{
+  "actor_id": null,
+  "command": [
+    "bash",
+    "-lc",
+    "source /home/yoon-tae-ho/miniconda3/etc/profile.d/conda.sh && conda activate garage_2 && source /home/yoon-tae-ho/sim/e2e_models/scripts/env_garage_2.sh && PORT=2000 DEBUG=1 /home/yoon-tae-ho/sim/e2e_models/scripts/run_tfpp_debug_route.sh"
+  ],
+  "duration_seconds": 379.38544607162476,
+  "end_time": 1779187462.9849362,
+  "host": "127.0.0.1",
+  "identity": false,
+  "label": "A0",
+  "port": 2000,
+  "return_code": -15,
+  "role_name": "hero",
+  "sidecar_csv": "",
+  "sidecar_only": false,
+  "start_time": 1779187083.5994902,
+  "status": "route_command_failed"
+}
