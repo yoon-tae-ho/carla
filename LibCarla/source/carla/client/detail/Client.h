@@ -30,6 +30,7 @@
 #include "carla/rpc/VehicleLightState.h"
 #include "carla/rpc/VehiclePhysicsControl.h"
 #include "carla/rpc/VehicleWheels.h"
+#include "carla/rpc/SuspensionPhysicsControl.h"
 #include "carla/rpc/WeatherParameters.h"
 #include "carla/rpc/Texture.h"
 #include "carla/rpc/MaterialParameter.h"
@@ -153,11 +154,17 @@ namespace detail {
 
     rpc::VehiclePhysicsControl GetVehiclePhysicsControl(rpc::ActorId vehicle) const;
 
+    rpc::SuspensionPhysicsControl GetVehicleSuspensionPhysicsControl(rpc::ActorId vehicle) const;
+
     rpc::VehicleLightState GetVehicleLightState(rpc::ActorId vehicle) const;
 
     void ApplyPhysicsControlToVehicle(
         rpc::ActorId vehicle,
         const rpc::VehiclePhysicsControl &physics_control);
+
+    void ApplySuspensionPhysicsControlToVehicle(
+        rpc::ActorId vehicle,
+        const rpc::SuspensionPhysicsControl &suspension_physics_control);
 
     void SetLightStateToVehicle(
         rpc::ActorId vehicle,

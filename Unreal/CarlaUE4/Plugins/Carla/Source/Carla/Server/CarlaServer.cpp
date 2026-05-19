@@ -50,6 +50,7 @@
 #include <carla/rpc/Response.h>
 #include <carla/rpc/Server.h>
 #include <carla/rpc/String.h>
+#include <carla/rpc/SuspensionPhysicsControl.h>
 #include <carla/rpc/Transform.h>
 #include <carla/rpc/Vector2D.h>
 #include <carla/rpc/Vector3D.h>
@@ -1299,6 +1300,31 @@ BIND_SYNC(is_sensor_enabled_for_ros) << [this](carla::streaming::detail::stream_
     return cr::VehiclePhysicsControl(PhysicsControl);
   };
 
+  BIND_SYNC(get_suspension_physics_control) << [this](
+      cr::ActorId ActorId) -> R<cr::SuspensionPhysicsControl>
+  {
+    REQUIRE_CARLA_EPISODE();
+    FCarlaActor* CarlaActor = Episode->FindCarlaActor(ActorId);
+    if (!CarlaActor)
+    {
+      return RespondError(
+          "get_suspension_physics_control",
+          ECarlaServerResponse::ActorNotFound,
+          " Actor Id: " + FString::FromInt(ActorId));
+    }
+    FSuspensionPhysicsControl SuspensionPhysicsControl;
+    ECarlaServerResponse Response =
+        CarlaActor->GetSuspensionPhysicsControl(SuspensionPhysicsControl);
+    if (Response != ECarlaServerResponse::Success)
+    {
+      return RespondError(
+          "get_suspension_physics_control",
+          Response,
+          " Actor Id: " + FString::FromInt(ActorId));
+    }
+    return cr::SuspensionPhysicsControl(SuspensionPhysicsControl);
+  };
+
   BIND_SYNC(get_vehicle_light_state) << [this](
       cr::ActorId ActorId) -> R<cr::VehicleLightState>
   {
@@ -1343,6 +1369,32 @@ BIND_SYNC(is_sensor_enabled_for_ros) << [this](carla::streaming::detail::stream_
     {
       return RespondError(
           "apply_physics_control",
+          Response,
+          " Actor Id: " + FString::FromInt(ActorId));
+    }
+    return R<void>::Success();
+  };
+
+  BIND_SYNC(apply_suspension_physics_control) << [this](
+      cr::ActorId ActorId,
+      cr::SuspensionPhysicsControl SuspensionPhysicsControl) -> R<void>
+  {
+    REQUIRE_CARLA_EPISODE();
+    FCarlaActor* CarlaActor = Episode->FindCarlaActor(ActorId);
+    if (!CarlaActor)
+    {
+      return RespondError(
+          "apply_suspension_physics_control",
+          ECarlaServerResponse::ActorNotFound,
+          " Actor Id: " + FString::FromInt(ActorId));
+    }
+    ECarlaServerResponse Response =
+        CarlaActor->ApplySuspensionPhysicsControl(
+            FSuspensionPhysicsControl(SuspensionPhysicsControl));
+    if (Response != ECarlaServerResponse::Success)
+    {
+      return RespondError(
+          "apply_suspension_physics_control",
           Response,
           " Actor Id: " + FString::FromInt(ActorId));
     }

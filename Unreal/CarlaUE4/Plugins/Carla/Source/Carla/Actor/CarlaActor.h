@@ -245,6 +245,11 @@ public:
     return ECarlaServerResponse::ActorTypeMismatch;
   }
 
+  virtual ECarlaServerResponse GetSuspensionPhysicsControl(FSuspensionPhysicsControl&)
+  {
+    return ECarlaServerResponse::NotAVehicle;
+  }
+
   virtual ECarlaServerResponse GetFailureState(carla::rpc::VehicleFailureState&)
   {
     return ECarlaServerResponse::ActorTypeMismatch;
@@ -268,6 +273,11 @@ public:
   virtual ECarlaServerResponse ApplyPhysicsControl(const FVehiclePhysicsControl&)
   {
     return ECarlaServerResponse::ActorTypeMismatch;
+  }
+
+  virtual ECarlaServerResponse ApplySuspensionPhysicsControl(const FSuspensionPhysicsControl&)
+  {
+    return ECarlaServerResponse::NotAVehicle;
   }
 
   virtual ECarlaServerResponse SetVehicleLightState(const FVehicleLightState&)
@@ -484,6 +494,9 @@ public:
 
   virtual ECarlaServerResponse GetPhysicsControl(FVehiclePhysicsControl& PhysicsControl) final;
 
+  virtual ECarlaServerResponse GetSuspensionPhysicsControl(
+      FSuspensionPhysicsControl& SuspensionPhysicsControl) final;
+
   virtual ECarlaServerResponse GetFailureState(carla::rpc::VehicleFailureState&) final;
 
   virtual ECarlaServerResponse GetVehicleLightState(FVehicleLightState& LightState) final;
@@ -494,6 +507,9 @@ public:
 
   virtual ECarlaServerResponse ApplyPhysicsControl(
       const FVehiclePhysicsControl& PhysicsControl) final;
+
+  virtual ECarlaServerResponse ApplySuspensionPhysicsControl(
+      const FSuspensionPhysicsControl& SuspensionPhysicsControl) final;
 
   virtual ECarlaServerResponse SetVehicleLightState(
       const FVehicleLightState& LightState) final;

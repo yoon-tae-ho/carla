@@ -15,6 +15,7 @@
 #include "carla/rpc/VehicleLightState.h"
 #include "carla/rpc/VehiclePhysicsControl.h"
 #include "carla/rpc/VehicleWheels.h"
+#include "carla/rpc/SuspensionPhysicsControl.h"
 #include "carla/trafficmanager/TrafficManager.h"
 
 using carla::traffic_manager::constants::Networking::TM_DEFAULT_PORT;
@@ -35,6 +36,7 @@ namespace client {
     using Control = rpc::VehicleControl;
     using AckermannControl = rpc::VehicleAckermannControl;
     using PhysicsControl = rpc::VehiclePhysicsControl;
+    using SuspensionPhysicsControl = rpc::SuspensionPhysicsControl;
     using LightState = rpc::VehicleLightState::LightState;
     using TM = traffic_manager::TrafficManager;
     using VehicleDoor = rpc::VehicleDoor;
@@ -66,6 +68,9 @@ namespace client {
     /// Apply physics control to this vehicle.
     void ApplyPhysicsControl(const PhysicsControl &physics_control);
 
+    /// Apply runtime suspension physics control to this vehicle.
+    void ApplySuspensionPhysicsControl(const SuspensionPhysicsControl &suspension_physics_control);
+
     /// Open a door in this vehicle
     void OpenDoor(const VehicleDoor door_idx);
 
@@ -93,6 +98,11 @@ namespace client {
     ///
     /// @warning This function does call the simulator.
     PhysicsControl GetPhysicsControl() const;
+
+    /// Return the runtime suspension physics control of this vehicle.
+    ///
+    /// @warning This function does call the simulator.
+    SuspensionPhysicsControl GetSuspensionPhysicsControl() const;
 
     /// Return the current open lights (LightState) of this vehicle.
     ///

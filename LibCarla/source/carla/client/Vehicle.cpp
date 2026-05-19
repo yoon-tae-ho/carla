@@ -71,6 +71,11 @@ namespace client {
     GetEpisode().Lock()->ApplyPhysicsControlToVehicle(*this, physics_control);
   }
 
+  void Vehicle::ApplySuspensionPhysicsControl(
+      const SuspensionPhysicsControl &suspension_physics_control) {
+    GetEpisode().Lock()->ApplySuspensionPhysicsControlToVehicle(*this, suspension_physics_control);
+  }
+
   void Vehicle::OpenDoor(const VehicleDoor door_idx) {
     GetEpisode().Lock()->OpenVehicleDoor(*this, rpc::VehicleDoor(door_idx));
   }
@@ -97,6 +102,10 @@ namespace client {
 
   Vehicle::PhysicsControl Vehicle::GetPhysicsControl() const {
     return GetEpisode().Lock()->GetVehiclePhysicsControl(*this);
+  }
+
+  Vehicle::SuspensionPhysicsControl Vehicle::GetSuspensionPhysicsControl() const {
+    return GetEpisode().Lock()->GetVehicleSuspensionPhysicsControl(*this);
   }
 
   Vehicle::LightState Vehicle::GetLightState() const {

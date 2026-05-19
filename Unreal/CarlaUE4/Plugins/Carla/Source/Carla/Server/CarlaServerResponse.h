@@ -21,7 +21,8 @@ enum class ECarlaServerResponse
   AutoPilotNotSupported,
   CarSimPluginNotEnabled,
   NotATrafficLight,
-  FunctionNotAvailiableWhenDormant
+  FunctionNotAvailiableWhenDormant,
+  SuspensionPhysicsControlFailed
 };
 
 FString CarlaGetStringError(ECarlaServerResponse Response);

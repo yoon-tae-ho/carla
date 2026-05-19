@@ -26,6 +26,7 @@
 #include "carla/rpc/VehicleLightStateList.h"
 #include "carla/rpc/LabelledPoint.h"
 #include "carla/rpc/VehicleWheels.h"
+#include "carla/rpc/SuspensionPhysicsControl.h"
 #include "carla/rpc/Texture.h"
 #include "carla/rpc/MaterialParameter.h"
 
@@ -261,6 +262,10 @@ namespace detail {
 
     rpc::VehiclePhysicsControl GetVehiclePhysicsControl(const Vehicle &vehicle) const {
       return _client.GetVehiclePhysicsControl(vehicle.GetId());
+    }
+
+    rpc::SuspensionPhysicsControl GetVehicleSuspensionPhysicsControl(const Vehicle &vehicle) const {
+      return _client.GetVehicleSuspensionPhysicsControl(vehicle.GetId());
     }
 
     rpc::VehicleLightState GetVehicleLightState(const Vehicle &vehicle) const {
@@ -526,6 +531,12 @@ namespace detail {
 
     void ApplyPhysicsControlToVehicle(Vehicle &vehicle, const rpc::VehiclePhysicsControl &physicsControl) {
       _client.ApplyPhysicsControlToVehicle(vehicle.GetId(), physicsControl);
+    }
+
+    void ApplySuspensionPhysicsControlToVehicle(
+        Vehicle &vehicle,
+        const rpc::SuspensionPhysicsControl &suspensionPhysicsControl) {
+      _client.ApplySuspensionPhysicsControlToVehicle(vehicle.GetId(), suspensionPhysicsControl);
     }
 
     void SetLightStateToVehicle(Vehicle &vehicle, const rpc::VehicleLightState light_state) {

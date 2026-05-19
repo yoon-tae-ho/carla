@@ -663,6 +663,29 @@ ECarlaServerResponse FVehicleActor::GetPhysicsControl(FVehiclePhysicsControl& Ph
   return ECarlaServerResponse::Success;
 }
 
+ECarlaServerResponse FVehicleActor::GetSuspensionPhysicsControl(
+    FSuspensionPhysicsControl& SuspensionPhysicsControl)
+{
+  if (IsDormant())
+  {
+    return ECarlaServerResponse::FunctionNotAvailiableWhenDormant;
+  }
+
+  auto Vehicle = Cast<ACarlaWheeledVehicle>(GetActor());
+  if (Vehicle == nullptr)
+  {
+    return ECarlaServerResponse::NotAVehicle;
+  }
+
+  SuspensionPhysicsControl = Vehicle->GetSuspensionPhysicsControl();
+  if (SuspensionPhysicsControl.Wheels.Num() != 4)
+  {
+    return ECarlaServerResponse::SuspensionPhysicsControlFailed;
+  }
+
+  return ECarlaServerResponse::Success;
+}
+
 ECarlaServerResponse FVehicleActor::GetFailureState(carla::rpc::VehicleFailureState& FailureState)
 {
   if (IsDormant())
@@ -748,6 +771,28 @@ ECarlaServerResponse FVehicleActor::ApplyPhysicsControl(
 
     Vehicle->ApplyVehiclePhysicsControl(PhysicsControl);
   }
+  return ECarlaServerResponse::Success;
+}
+
+ECarlaServerResponse FVehicleActor::ApplySuspensionPhysicsControl(
+    const FSuspensionPhysicsControl& SuspensionPhysicsControl)
+{
+  if (IsDormant())
+  {
+    return ECarlaServerResponse::FunctionNotAvailiableWhenDormant;
+  }
+
+  auto Vehicle = Cast<ACarlaWheeledVehicle>(GetActor());
+  if (Vehicle == nullptr)
+  {
+    return ECarlaServerResponse::NotAVehicle;
+  }
+
+  if (!Vehicle->ApplySuspensionPhysicsControl(SuspensionPhysicsControl))
+  {
+    return ECarlaServerResponse::SuspensionPhysicsControlFailed;
+  }
+
   return ECarlaServerResponse::Success;
 }
 

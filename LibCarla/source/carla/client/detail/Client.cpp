@@ -16,6 +16,7 @@
 #include "carla/rpc/Client.h"
 #include "carla/rpc/DebugShape.h"
 #include "carla/rpc/Response.h"
+#include "carla/rpc/SuspensionPhysicsControl.h"
 #include "carla/rpc/VehicleAckermannControl.h"
 #include "carla/rpc/VehicleControl.h"
 #include "carla/rpc/VehicleLightState.h"
@@ -278,6 +279,13 @@ namespace detail {
     return _pimpl->CallAndWait<carla::rpc::VehiclePhysicsControl>("get_physics_control", vehicle);
   }
 
+  rpc::SuspensionPhysicsControl Client::GetVehicleSuspensionPhysicsControl(
+      rpc::ActorId vehicle) const {
+    return _pimpl->CallAndWait<carla::rpc::SuspensionPhysicsControl>(
+        "get_suspension_physics_control",
+        vehicle);
+  }
+
   rpc::VehicleLightState Client::GetVehicleLightState(
       rpc::ActorId vehicle) const {
     return _pimpl->CallAndWait<carla::rpc::VehicleLightState>("get_vehicle_light_state", vehicle);
@@ -287,6 +295,15 @@ namespace detail {
       rpc::ActorId vehicle,
       const rpc::VehiclePhysicsControl &physics_control) {
     return _pimpl->AsyncCall("apply_physics_control", vehicle, physics_control);
+  }
+
+  void Client::ApplySuspensionPhysicsControlToVehicle(
+      rpc::ActorId vehicle,
+      const rpc::SuspensionPhysicsControl &suspension_physics_control) {
+    return _pimpl->AsyncCall(
+        "apply_suspension_physics_control",
+        vehicle,
+        suspension_physics_control);
   }
 
   void Client::SetLightStateToVehicle(

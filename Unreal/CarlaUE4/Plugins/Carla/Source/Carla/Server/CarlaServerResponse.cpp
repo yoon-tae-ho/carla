@@ -36,6 +36,8 @@ FString CarlaGetStringError(ECarlaServerResponse Response)
       return "Actor is not a traffic light";
     case ECarlaServerResponse::FunctionNotAvailiableWhenDormant:
       return "Function not availiable when the actor is dormant";
+    case ECarlaServerResponse::SuspensionPhysicsControlFailed:
+      return "Suspension physics control failed; wheel count or values are invalid";
   }
   return "unknown error";
 }
