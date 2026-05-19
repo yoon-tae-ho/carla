@@ -8,6 +8,8 @@
 #include <carla/rpc/VehicleAckermannControl.h>
 #include <carla/rpc/VehicleControl.h>
 #include <carla/rpc/VehiclePhysicsControl.h>
+#include <carla/rpc/SuspensionPhysicsControl.h>
+#include <carla/rpc/WheelSuspensionPhysicsControl.h>
 #include <carla/rpc/WheelPhysicsControl.h>
 #include <carla/rpc/WalkerControl.h>
 #include <carla/rpc/WalkerBoneControlIn.h>
@@ -95,6 +97,15 @@ namespace rpc {
     return out;
   }
 
+  std::ostream &operator<<(std::ostream &out, const WheelSuspensionPhysicsControl &control) {
+    out << "WheelSuspensionPhysicsControl(spring_strength=" << std::to_string(control.spring_strength)
+        << ", spring_damper_rate=" << std::to_string(control.spring_damper_rate)
+        << ", max_compression=" << std::to_string(control.max_compression)
+        << ", max_droop=" << std::to_string(control.max_droop)
+        << ", sprung_mass=" << std::to_string(control.sprung_mass) << ')';
+    return out;
+  }
+
   std::ostream &operator<<(std::ostream &out, const VehiclePhysicsControl &control) {
     out << "VehiclePhysicsControl(torque_curve=" << control.torque_curve
     << ", max_rpm=" << std::to_string(control.max_rpm)
@@ -113,6 +124,11 @@ namespace rpc {
     << ", steering_curve=" << control.steering_curve
     << ", wheels=" << control.wheels
     << ", use_sweep_wheel_collision=" << control.use_sweep_wheel_collision << ')';
+    return out;
+  }
+
+  std::ostream &operator<<(std::ostream &out, const SuspensionPhysicsControl &control) {
+    out << "SuspensionPhysicsControl(wheels=" << control.wheels << ')';
     return out;
   }
 
@@ -181,6 +197,25 @@ static void SetWheels(carla::rpc::VehiclePhysicsControl &self, const boost::pyth
   self.wheels = wheels;
 }
 
+static auto GetSuspensionWheels(const carla::rpc::SuspensionPhysicsControl &self) {
+  const auto &wheels = self.GetWheels();
+  boost::python::object get_iter =
+      boost::python::iterator<std::vector<carla::rpc::WheelSuspensionPhysicsControl>>();
+  boost::python::object iter = get_iter(wheels);
+  return boost::python::list(iter);
+}
+
+static void SetSuspensionWheels(
+    carla::rpc::SuspensionPhysicsControl &self,
+    const boost::python::list &list) {
+  std::vector<carla::rpc::WheelSuspensionPhysicsControl> wheels;
+  auto length = boost::python::len(list);
+  for (auto i = 0u; i < length; ++i) {
+    wheels.push_back(boost::python::extract<carla::rpc::WheelSuspensionPhysicsControl &>(list[i]));
+  }
+  self.wheels = wheels;
+}
+
 static auto GetForwardGears(const carla::rpc::VehiclePhysicsControl &self) {
   const auto &gears = self.GetForwardGears();
   boost::python::object get_iter = boost::python::iterator<std::vector<carla::rpc::GearPhysicsControl>>();
@@ -243,6 +278,31 @@ boost::python::object VehiclePhysicsControl_init(boost::python::tuple args, boos
     "steering_curve",
     "wheels",
     "use_sweep_wheel_collision",
+  };
+
+  boost::python::object self = args[0];
+  args = boost::python::tuple(args.slice(1, boost::python::_));
+
+  auto res = self.attr("__init__")();
+  if (len(args) > 0) {
+    for (unsigned int i = 0; i < len(args); ++i) {
+      self.attr(args_names[i]) = args[i];
+    }
+  }
+
+  for (unsigned int i = 0; i < NUM_ARGUMENTS; ++i) {
+    if (kwargs.contains(args_names[i])) {
+      self.attr(args_names[i]) = kwargs[args_names[i]];
+    }
+  }
+
+  return res;
+}
+
+boost::python::object SuspensionPhysicsControl_init(boost::python::tuple args, boost::python::dict kwargs) {
+  const uint32_t NUM_ARGUMENTS = 1;
+  const char *args_names[NUM_ARGUMENTS] = {
+    "wheels",
   };
 
   boost::python::object self = args[0];
@@ -477,6 +537,37 @@ void export_control() {
     .def_readwrite("position", &cr::WheelPhysicsControl::position)
     .def("__eq__", &cr::WheelPhysicsControl::operator==)
     .def("__ne__", &cr::WheelPhysicsControl::operator!=)
+    .def(self_ns::str(self_ns::self))
+  ;
+
+  class_<std::vector<cr::WheelSuspensionPhysicsControl>>("vector_of_suspension_wheels")
+    .def(boost::python::vector_indexing_suite<std::vector<cr::WheelSuspensionPhysicsControl>>())
+    .def(self_ns::str(self_ns::self))
+  ;
+
+  class_<cr::WheelSuspensionPhysicsControl>("WheelSuspensionPhysicsControl")
+    .def(init<float, float, float, float, float>(
+        (arg("spring_strength")=0.0f,
+         arg("spring_damper_rate")=0.0f,
+         arg("max_compression")=0.0f,
+         arg("max_droop")=0.0f,
+         arg("sprung_mass")=0.0f)))
+    .def_readwrite("spring_strength", &cr::WheelSuspensionPhysicsControl::spring_strength)
+    .def_readwrite("spring_damper_rate", &cr::WheelSuspensionPhysicsControl::spring_damper_rate)
+    .def_readwrite("max_compression", &cr::WheelSuspensionPhysicsControl::max_compression)
+    .def_readwrite("max_droop", &cr::WheelSuspensionPhysicsControl::max_droop)
+    .def_readwrite("sprung_mass", &cr::WheelSuspensionPhysicsControl::sprung_mass)
+    .def("__eq__", &cr::WheelSuspensionPhysicsControl::operator==)
+    .def("__ne__", &cr::WheelSuspensionPhysicsControl::operator!=)
+    .def(self_ns::str(self_ns::self))
+  ;
+
+  class_<cr::SuspensionPhysicsControl>("SuspensionPhysicsControl", no_init)
+    .def("__init__", raw_function(SuspensionPhysicsControl_init))
+    .def(init<>())
+    .add_property("wheels", &GetSuspensionWheels, &SetSuspensionWheels)
+    .def("__eq__", &cr::SuspensionPhysicsControl::operator==)
+    .def("__ne__", &cr::SuspensionPhysicsControl::operator!=)
     .def(self_ns::str(self_ns::self))
   ;
 
