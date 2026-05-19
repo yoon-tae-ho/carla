@@ -296,6 +296,15 @@
       doc: >
         Applies a physics control object in the next tick containing the parameters that define the vehicle as a corporeal body. E.g.: moment of inertia, mass, drag coefficient and many more. 
     # --------------------------------------
+    - def_name: apply_suspension_physics_control
+      params:
+      - param_name: suspension_physics_control
+        type: carla.SuspensionPhysicsControl
+      doc: >
+        Applies raw internal CARLA/PhysX suspension spring and damper values without recreating the vehicle physics state. This API is separate from carla.VehiclePhysicsControl and uses wheel order FL, FR, RL/BL, RR/BR.
+      note: >
+        Use carla.Vehicle.get_suspension_physics_control() as the native baseline before applying scales. Initial research sweeps should stay close to native values, for example spring_scale in [0.90, 1.10] and damper_scale in [0.90, 1.20].
+    # --------------------------------------
     - def_name: is_at_traffic_light
       return: bool
       doc: >
@@ -316,6 +325,14 @@
       return: carla.VehiclePhysicsControl
       doc: >
         The simulator returns the last physics control applied to this vehicle.
+      warning: This method does call the simulator to retrieve the value.
+    # --------------------------------------
+    - def_name: get_suspension_physics_control
+      return: carla.SuspensionPhysicsControl
+      doc: >
+        The simulator returns raw internal CARLA/PhysX suspension data for this vehicle as carla.SuspensionPhysicsControl containing carla.WheelSuspensionPhysicsControl entries. Wheel order is FL, FR, RL/BL, RR/BR.
+      note: >
+        This API directly reads PhysX suspension data and is separate from carla.VehiclePhysicsControl. The matching apply_suspension_physics_control() method writes spring_strength and spring_damper_rate without recreating the physics state.
       warning: This method does call the simulator to retrieve the value.
     # --------------------------------------
     - def_name: get_speed_limit
