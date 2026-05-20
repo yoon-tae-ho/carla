@@ -6,7 +6,7 @@
 # This work is licensed under the terms of the MIT license.
 # For a copy, see <https://opensource.org/licenses/MIT>.
 
-"""Run lateral maneuvers with static PhysX suspension scale variants.
+"""Run lateral maneuvers with a damping-only PhysX suspension scale sweep.
 
 This script extends the straight action replay tests with lateral excitation:
 
@@ -14,10 +14,14 @@ This script extends the straight action replay tests with lateral excitation:
   * sine steer response
   * brake-in-turn coupling
 
-Each maneuver is replayed with S0-S5 suspension variants. S0 is stock CARLA
-with no suspension API call; S1 is identity; S2-S5 are static scale variants.
-Profiles and summary metrics are written under PythonAPI/taeho/results by
-default.
+Each maneuver is replayed with stock CARLA plus a damping coefficient sweep.
+For every API-controlled scenario spring_scale is fixed at 1.0, while
+damper_scale is swept in ascending order. The default damping sweep is:
+
+  0.80, 0.90, 1.00, 1.10, 1.20
+
+The 1.00 case is the identity guardrail. Profiles and summary metrics are
+written under PythonAPI/taeho/results by default.
 """
 
 from __future__ import print_function
@@ -64,51 +68,49 @@ SUSPENSION_FIELDS = (
 )
 
 
-def scenario_definitions():
-    return (
+def scale_token(value):
+    return ('%0.2f' % value).replace('.', 'p')
+
+
+def scenario_definitions(damper_scales):
+    scenarios = [
         {
-            'name': 'S0_stock',
-            'label': 'S0 stock',
+            'name': 'D0_stock',
+            'label': 'D0 stock',
             'spring_scale': None,
             'damper_scale': None,
             'uses_suspension_api': False,
+            'is_identity': False,
         },
-        {
-            'name': 'S1_identity',
-            'label': 'S1 identity',
+    ]
+
+    for index, damper_scale in enumerate(sorted(damper_scales), start=1):
+        if not math.isfinite(damper_scale) or damper_scale <= 0.0:
+            raise RuntimeError('damper scale must be finite and positive: %r' %
+                               damper_scale)
+
+        is_identity = math.isclose(
+            damper_scale,
+            1.0,
+            rel_tol=1.0e-9,
+            abs_tol=1.0e-9)
+        if is_identity:
+            name = 'D%d_identity_c%s' % (index, scale_token(damper_scale))
+            label = 'D%d identity k=1.00 c=%0.2f' % (index, damper_scale)
+        else:
+            name = 'D%d_damper_c%s' % (index, scale_token(damper_scale))
+            label = 'D%d k=1.00 c=%0.2f' % (index, damper_scale)
+
+        scenarios.append({
+            'name': name,
+            'label': label,
             'spring_scale': 1.0,
-            'damper_scale': 1.0,
+            'damper_scale': damper_scale,
             'uses_suspension_api': True,
-        },
-        {
-            'name': 'S2_k0.95_csqrt',
-            'label': 'S2 k=0.95 c=sqrt(0.95)',
-            'spring_scale': 0.95,
-            'damper_scale': math.sqrt(0.95),
-            'uses_suspension_api': True,
-        },
-        {
-            'name': 'S3_k1.05_csqrt',
-            'label': 'S3 k=1.05 c=sqrt(1.05)',
-            'spring_scale': 1.05,
-            'damper_scale': math.sqrt(1.05),
-            'uses_suspension_api': True,
-        },
-        {
-            'name': 'S4_k1.00_c1.10',
-            'label': 'S4 k=1.00 c=1.10',
-            'spring_scale': 1.0,
-            'damper_scale': 1.10,
-            'uses_suspension_api': True,
-        },
-        {
-            'name': 'S5_k1.05_c1.10',
-            'label': 'S5 k=1.05 c=1.10',
-            'spring_scale': 1.05,
-            'damper_scale': 1.10,
-            'uses_suspension_api': True,
-        },
-    )
+            'is_identity': is_identity,
+        })
+
+    return tuple(scenarios)
 
 
 def parse_float_list(value):
@@ -588,11 +590,11 @@ def build_summary(results, args):
     for maneuver_name, maneuver_results in by_maneuver.items():
         baseline = None
         for result in maneuver_results:
-            if result['scenario']['name'] == 'S0_stock':
+            if not result['scenario']['uses_suspension_api']:
                 baseline = result
                 break
         if baseline is None:
-            raise RuntimeError('missing S0_stock for %s' % maneuver_name)
+            raise RuntimeError('missing stock baseline for %s' % maneuver_name)
 
         for result in maneuver_results:
             summary.append(compare_to_baseline(baseline, result, args))
@@ -602,7 +604,7 @@ def build_summary(results, args):
 
 def print_summary(summary_rows):
     print('')
-    print('Lateral maneuver summary against matching S0 stock baseline:')
+    print('Lateral maneuver summary against matching stock baseline:')
     print(
         '%-24s %-20s %9s %9s %9s %9s %9s %9s %5s' % (
             'maneuver',
@@ -630,9 +632,16 @@ def print_summary(summary_rows):
 
 def check_identity(summary_rows, args):
     failures = []
+    identity_rows = 0
     for row in summary_rows:
-        if row['scenario'] != 'S1_identity':
+        spring_scale = row['spring_scale']
+        damper_scale = row['damper_scale']
+        if spring_scale is None or damper_scale is None:
             continue
+        if not (math.isclose(float(spring_scale), 1.0) and
+                math.isclose(float(damper_scale), 1.0)):
+            continue
+        identity_rows += 1
         if row['final_position_diff'] > args.identity_final_position_threshold:
             failures.append('%s final position diff %0.6f > %0.6f m' % (
                 row['maneuver'],
@@ -659,9 +668,14 @@ def check_identity(summary_rows, args):
                 row['max_yaw_rate_diff'],
                 args.identity_yaw_rate_threshold))
         if row['collisions'] > 0:
-            failures.append('%s S1 collision count is %d' % (
+            failures.append('%s identity collision count is %d' % (
                 row['maneuver'],
                 row['collisions']))
+
+    if identity_rows == 0:
+        print('')
+        print('SKIP: no k=1.00 c=1.00 identity damping case was configured.')
+        return
 
     if failures:
         print('')
@@ -671,8 +685,8 @@ def check_identity(summary_rows, args):
         raise RuntimeError('identity guardrail failed')
 
     print('')
-    print('PASS: S1 identity matched S0 stock for all lateral maneuvers.')
-    print('S2-S5 are measurement scenarios; lateral response differences are expected.')
+    print('PASS: identity damping case matched stock for all lateral maneuvers.')
+    print('Other damping-only cases are measurement scenarios; response differences are expected.')
 
 
 def output_dir_path(args):
@@ -690,9 +704,9 @@ def write_csv_outputs(results, summary_rows, args):
     output_dir = output_dir_path(args)
     os.makedirs(output_dir, exist_ok=True)
 
-    summary_path = os.path.join(output_dir, 'suspension_lateral_summary.csv')
-    profile_path = os.path.join(output_dir, 'suspension_lateral_profiles.csv')
-    collision_path = os.path.join(output_dir, 'suspension_lateral_collisions.csv')
+    summary_path = os.path.join(output_dir, '%s_summary.csv' % args.output_prefix)
+    profile_path = os.path.join(output_dir, '%s_profiles.csv' % args.output_prefix)
+    collision_path = os.path.join(output_dir, '%s_collisions.csv' % args.output_prefix)
 
     summary_fields = (
         'maneuver',
@@ -800,7 +814,7 @@ def main(args):
         world.apply_settings(settings)
 
         blueprint = find_target_blueprint(world)
-        scenarios = scenario_definitions()
+        scenarios = scenario_definitions(parse_float_list(args.damper_scales))
         maneuvers = maneuver_definitions(args)
         results = []
         reference_transform = None
@@ -865,6 +879,12 @@ if __name__ == '__main__':
         default=50,
         type=int,
         help='state log period in ticks; 0 disables logs (default: 50)')
+    argparser.add_argument(
+        '--damper-scales',
+        default='0.80,0.90,1.00,1.10,1.20',
+        help='comma-separated damping-only scale sweep. Spring scale remains '
+             '1.00 for every API-controlled scenario '
+             '(default: 0.80,0.90,1.00,1.10,1.20)')
     argparser.add_argument(
         '--circle-steers',
         default='0.10,0.20,0.30',
@@ -953,6 +973,11 @@ if __name__ == '__main__':
         default='results',
         help='CSV output directory, relative to this script unless absolute '
              '(default: results)')
+    argparser.add_argument(
+        '--output-prefix',
+        default='suspension_lateral_damping_sweep',
+        help='CSV output filename prefix (default: '
+             'suspension_lateral_damping_sweep)')
     argparser.add_argument(
         '--no-write-csv',
         dest='write_csv',
