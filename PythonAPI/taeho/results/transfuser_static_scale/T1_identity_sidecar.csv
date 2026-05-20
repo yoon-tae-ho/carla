@@ -1,0 +1,56 @@
+wall_time,scenario,label,event,frame,actor_id,type_id,role_name,spring_scale,damper_scale,apply_count,verify_count,message
+1779189714.984250,T1_identity,T1 identity,connected,,,,,1,1,,,connected to CARLA
+1779189715.007431,T1_identity,T1 identity,waiting_for_vehicle,2752,,,,1,1,,,no matching vehicle found
+1779189721.684321,T1_identity,T1 identity,runtime_error,,,,,1,1,,,"time-out of 5000ms while waiting for the simulator, make sure the simulator is ready and connected to 127.0.0.1:2000"
+1779189722.685572,T1_identity,T1 identity,waiting_for_vehicle,2854,,,,1,1,,,no matching vehicle found
+1779189727.855448,T1_identity,T1 identity,waiting_for_vehicle,2858,,,,1,1,,,no matching vehicle found
+1779189728.229977,T1_identity,T1 identity,native_captured,2859,493,vehicle.lincoln.mkz_2020,hero,1,1,0,0,captured native suspension
+1779189728.230035,T1_identity,T1 identity,static_applied,2859,493,vehicle.lincoln.mkz_2020,hero,1,1,1,0,applied static suspension command
+1779189728.450713,T1_identity,T1 identity,static_verified,2859,493,vehicle.lincoln.mkz_2020,hero,1,1,1,1,readback matched static command
+1779189733.460155,T1_identity,T1 identity,runtime_error,,,,,1,1,,,"time-out of 5000ms while waiting for the simulator, make sure the simulator is ready and connected to 127.0.0.1:2000"
+1779189748.677262,T1_identity,T1 identity,static_verified,2908,493,vehicle.lincoln.mkz_2020,hero,1,1,1,2,readback matched static command
+1779189761.618408,T1_identity,T1 identity,static_verified,2958,493,vehicle.lincoln.mkz_2020,hero,1,1,1,3,readback matched static command
+1779189775.109511,T1_identity,T1 identity,static_verified,3008,493,vehicle.lincoln.mkz_2020,hero,1,1,1,4,readback matched static command
+1779189788.760720,T1_identity,T1 identity,static_verified,3058,493,vehicle.lincoln.mkz_2020,hero,1,1,1,5,readback matched static command
+1779189801.863776,T1_identity,T1 identity,static_verified,3108,493,vehicle.lincoln.mkz_2020,hero,1,1,1,6,readback matched static command
+1779189815.508430,T1_identity,T1 identity,static_verified,3158,493,vehicle.lincoln.mkz_2020,hero,1,1,1,7,readback matched static command
+1779189830.222480,T1_identity,T1 identity,static_verified,3208,493,vehicle.lincoln.mkz_2020,hero,1,1,1,8,readback matched static command
+1779189845.098148,T1_identity,T1 identity,static_verified,3258,493,vehicle.lincoln.mkz_2020,hero,1,1,1,9,readback matched static command
+1779189860.452199,T1_identity,T1 identity,static_verified,3308,493,vehicle.lincoln.mkz_2020,hero,1,1,1,10,readback matched static command
+1779189875.548949,T1_identity,T1 identity,static_verified,3358,493,vehicle.lincoln.mkz_2020,hero,1,1,1,11,readback matched static command
+1779189890.663114,T1_identity,T1 identity,static_verified,3408,493,vehicle.lincoln.mkz_2020,hero,1,1,1,12,readback matched static command
+1779189906.131366,T1_identity,T1 identity,static_verified,3458,493,vehicle.lincoln.mkz_2020,hero,1,1,1,13,readback matched static command
+1779189921.198989,T1_identity,T1 identity,static_verified,3508,493,vehicle.lincoln.mkz_2020,hero,1,1,1,14,readback matched static command
+1779189936.599843,T1_identity,T1 identity,static_verified,3558,493,vehicle.lincoln.mkz_2020,hero,1,1,1,15,readback matched static command
+1779189951.521572,T1_identity,T1 identity,static_verified,3608,493,vehicle.lincoln.mkz_2020,hero,1,1,1,16,readback matched static command
+1779189966.656676,T1_identity,T1 identity,static_verified,3658,493,vehicle.lincoln.mkz_2020,hero,1,1,1,17,readback matched static command
+1779189981.953852,T1_identity,T1 identity,static_verified,3708,493,vehicle.lincoln.mkz_2020,hero,1,1,1,18,readback matched static command
+1779189997.014592,T1_identity,T1 identity,static_verified,3758,493,vehicle.lincoln.mkz_2020,hero,1,1,1,19,readback matched static command
+1779190012.078347,T1_identity,T1 identity,static_verified,3808,493,vehicle.lincoln.mkz_2020,hero,1,1,1,20,readback matched static command
+1779190026.774463,T1_identity,T1 identity,static_verified,3858,493,vehicle.lincoln.mkz_2020,hero,1,1,1,21,readback matched static command
+1779190042.498406,T1_identity,T1 identity,static_verified,3908,493,vehicle.lincoln.mkz_2020,hero,1,1,1,22,readback matched static command
+1779190057.180190,T1_identity,T1 identity,static_verified,3958,493,vehicle.lincoln.mkz_2020,hero,1,1,1,23,readback matched static command
+1779190069.404932,T1_identity,T1 identity,static_verified,4008,493,vehicle.lincoln.mkz_2020,hero,1,1,1,24,readback matched static command
+1779190081.770093,T1_identity,T1 identity,static_verified,4058,493,vehicle.lincoln.mkz_2020,hero,1,1,1,25,readback matched static command
+1779190093.817842,T1_identity,T1 identity,static_verified,4108,493,vehicle.lincoln.mkz_2020,hero,1,1,1,26,readback matched static command
+1779190099.810553,T1_identity,T1 identity,actor_removed,4128,,,,1,1,,,actor 493 disappeared
+1779190099.810578,T1_identity,T1 identity,waiting_for_vehicle,4128,,,,1,1,,,no matching vehicle found
+1779190103.472608,T1_identity,T1 identity,native_captured,4132,714,vehicle.lincoln.mkz_2020,hero,1,1,0,0,captured native suspension
+1779190103.472651,T1_identity,T1 identity,static_applied,4132,714,vehicle.lincoln.mkz_2020,hero,1,1,1,0,applied static suspension command
+1779190103.486683,T1_identity,T1 identity,static_verified,4132,714,vehicle.lincoln.mkz_2020,hero,1,1,1,1,readback matched static command
+1779190108.499092,T1_identity,T1 identity,runtime_error,,,,,1,1,,,"time-out of 5000ms while waiting for the simulator, make sure the simulator is ready and connected to 127.0.0.1:2000"
+1779190121.287021,T1_identity,T1 identity,static_verified,4181,714,vehicle.lincoln.mkz_2020,hero,1,1,1,2,readback matched static command
+1779190132.564993,T1_identity,T1 identity,static_verified,4231,714,vehicle.lincoln.mkz_2020,hero,1,1,1,3,readback matched static command
+1779190143.826922,T1_identity,T1 identity,static_verified,4281,714,vehicle.lincoln.mkz_2020,hero,1,1,1,4,readback matched static command
+1779190155.023821,T1_identity,T1 identity,static_verified,4331,714,vehicle.lincoln.mkz_2020,hero,1,1,1,5,readback matched static command
+1779190166.083956,T1_identity,T1 identity,static_verified,4381,714,vehicle.lincoln.mkz_2020,hero,1,1,1,6,readback matched static command
+1779190177.347639,T1_identity,T1 identity,static_verified,4431,714,vehicle.lincoln.mkz_2020,hero,1,1,1,7,readback matched static command
+1779190188.407605,T1_identity,T1 identity,static_verified,4481,714,vehicle.lincoln.mkz_2020,hero,1,1,1,8,readback matched static command
+1779190199.550415,T1_identity,T1 identity,static_verified,4531,714,vehicle.lincoln.mkz_2020,hero,1,1,1,9,readback matched static command
+1779190210.732244,T1_identity,T1 identity,static_verified,4581,714,vehicle.lincoln.mkz_2020,hero,1,1,1,10,readback matched static command
+1779190221.913286,T1_identity,T1 identity,static_verified,4631,714,vehicle.lincoln.mkz_2020,hero,1,1,1,11,readback matched static command
+1779190233.211479,T1_identity,T1 identity,static_verified,4681,714,vehicle.lincoln.mkz_2020,hero,1,1,1,12,readback matched static command
+1779190244.011225,T1_identity,T1 identity,static_verified,4731,714,vehicle.lincoln.mkz_2020,hero,1,1,1,13,readback matched static command
+1779190250.237345,T1_identity,T1 identity,actor_removed,4753,,,,1,1,,,actor 714 disappeared
+1779190250.237378,T1_identity,T1 identity,waiting_for_vehicle,4753,,,,1,1,,,no matching vehicle found
+1779190251.395868,T1_identity,T1 identity,stopped,,,,,1,1,,,sidecar stopped

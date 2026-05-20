@@ -1,0 +1,56 @@
+wall_time,scenario,label,event,frame,actor_id,type_id,role_name,spring_scale,damper_scale,apply_count,verify_count,message
+1779190802.967334,T3_k0.95_csqrt,T3 k=0.95 c=sqrt(0.95),connected,,,,,0.95,0.974679434,,,connected to CARLA
+1779190802.984801,T3_k0.95_csqrt,T3 k=0.95 c=sqrt(0.95),waiting_for_vehicle,7493,,,,0.95,0.974679434,,,no matching vehicle found
+1779190809.235505,T3_k0.95_csqrt,T3 k=0.95 c=sqrt(0.95),runtime_error,,,,,0.95,0.974679434,,,"time-out of 5000ms while waiting for the simulator, make sure the simulator is ready and connected to 127.0.0.1:2000"
+1779190810.236548,T3_k0.95_csqrt,T3 k=0.95 c=sqrt(0.95),waiting_for_vehicle,7570,,,,0.95,0.974679434,,,no matching vehicle found
+1779190815.623507,T3_k0.95_csqrt,T3 k=0.95 c=sqrt(0.95),waiting_for_vehicle,7574,,,,0.95,0.974679434,,,no matching vehicle found
+1779190815.997958,T3_k0.95_csqrt,T3 k=0.95 c=sqrt(0.95),native_captured,7575,1203,vehicle.lincoln.mkz_2020,hero,0.95,0.974679434,0,0,captured native suspension
+1779190815.998066,T3_k0.95_csqrt,T3 k=0.95 c=sqrt(0.95),static_applied,7575,1203,vehicle.lincoln.mkz_2020,hero,0.95,0.974679434,1,0,applied static suspension command
+1779190816.005589,T3_k0.95_csqrt,T3 k=0.95 c=sqrt(0.95),static_verified,7575,1203,vehicle.lincoln.mkz_2020,hero,0.95,0.974679434,1,1,readback matched static command
+1779190821.010706,T3_k0.95_csqrt,T3 k=0.95 c=sqrt(0.95),runtime_error,,,,,0.95,0.974679434,,,"time-out of 5000ms while waiting for the simulator, make sure the simulator is ready and connected to 127.0.0.1:2000"
+1779190836.399900,T3_k0.95_csqrt,T3 k=0.95 c=sqrt(0.95),static_verified,7624,1203,vehicle.lincoln.mkz_2020,hero,0.95,0.974679434,1,2,readback matched static command
+1779190849.389045,T3_k0.95_csqrt,T3 k=0.95 c=sqrt(0.95),static_verified,7674,1203,vehicle.lincoln.mkz_2020,hero,0.95,0.974679434,1,3,readback matched static command
+1779190863.186121,T3_k0.95_csqrt,T3 k=0.95 c=sqrt(0.95),static_verified,7724,1203,vehicle.lincoln.mkz_2020,hero,0.95,0.974679434,1,4,readback matched static command
+1779190877.113004,T3_k0.95_csqrt,T3 k=0.95 c=sqrt(0.95),static_verified,7774,1203,vehicle.lincoln.mkz_2020,hero,0.95,0.974679434,1,5,readback matched static command
+1779190890.438012,T3_k0.95_csqrt,T3 k=0.95 c=sqrt(0.95),static_verified,7824,1203,vehicle.lincoln.mkz_2020,hero,0.95,0.974679434,1,6,readback matched static command
+1779190904.455248,T3_k0.95_csqrt,T3 k=0.95 c=sqrt(0.95),static_verified,7874,1203,vehicle.lincoln.mkz_2020,hero,0.95,0.974679434,1,7,readback matched static command
+1779190919.433028,T3_k0.95_csqrt,T3 k=0.95 c=sqrt(0.95),static_verified,7924,1203,vehicle.lincoln.mkz_2020,hero,0.95,0.974679434,1,8,readback matched static command
+1779190934.411780,T3_k0.95_csqrt,T3 k=0.95 c=sqrt(0.95),static_verified,7974,1203,vehicle.lincoln.mkz_2020,hero,0.95,0.974679434,1,9,readback matched static command
+1779190950.379054,T3_k0.95_csqrt,T3 k=0.95 c=sqrt(0.95),static_verified,8024,1203,vehicle.lincoln.mkz_2020,hero,0.95,0.974679434,1,10,readback matched static command
+1779190965.578498,T3_k0.95_csqrt,T3 k=0.95 c=sqrt(0.95),static_verified,8074,1203,vehicle.lincoln.mkz_2020,hero,0.95,0.974679434,1,11,readback matched static command
+1779190980.954695,T3_k0.95_csqrt,T3 k=0.95 c=sqrt(0.95),static_verified,8124,1203,vehicle.lincoln.mkz_2020,hero,0.95,0.974679434,1,12,readback matched static command
+1779190996.852560,T3_k0.95_csqrt,T3 k=0.95 c=sqrt(0.95),static_verified,8174,1203,vehicle.lincoln.mkz_2020,hero,0.95,0.974679434,1,13,readback matched static command
+1779191012.308475,T3_k0.95_csqrt,T3 k=0.95 c=sqrt(0.95),static_verified,8224,1203,vehicle.lincoln.mkz_2020,hero,0.95,0.974679434,1,14,readback matched static command
+1779191028.016802,T3_k0.95_csqrt,T3 k=0.95 c=sqrt(0.95),static_verified,8274,1203,vehicle.lincoln.mkz_2020,hero,0.95,0.974679434,1,15,readback matched static command
+1779191044.268779,T3_k0.95_csqrt,T3 k=0.95 c=sqrt(0.95),static_verified,8324,1203,vehicle.lincoln.mkz_2020,hero,0.95,0.974679434,1,16,readback matched static command
+1779191060.211633,T3_k0.95_csqrt,T3 k=0.95 c=sqrt(0.95),static_verified,8374,1203,vehicle.lincoln.mkz_2020,hero,0.95,0.974679434,1,17,readback matched static command
+1779191075.785121,T3_k0.95_csqrt,T3 k=0.95 c=sqrt(0.95),static_verified,8424,1203,vehicle.lincoln.mkz_2020,hero,0.95,0.974679434,1,18,readback matched static command
+1779191091.133156,T3_k0.95_csqrt,T3 k=0.95 c=sqrt(0.95),static_verified,8474,1203,vehicle.lincoln.mkz_2020,hero,0.95,0.974679434,1,19,readback matched static command
+1779191106.040504,T3_k0.95_csqrt,T3 k=0.95 c=sqrt(0.95),static_verified,8524,1203,vehicle.lincoln.mkz_2020,hero,0.95,0.974679434,1,20,readback matched static command
+1779191121.826338,T3_k0.95_csqrt,T3 k=0.95 c=sqrt(0.95),static_verified,8574,1203,vehicle.lincoln.mkz_2020,hero,0.95,0.974679434,1,21,readback matched static command
+1779191136.805404,T3_k0.95_csqrt,T3 k=0.95 c=sqrt(0.95),static_verified,8624,1203,vehicle.lincoln.mkz_2020,hero,0.95,0.974679434,1,22,readback matched static command
+1779191148.936644,T3_k0.95_csqrt,T3 k=0.95 c=sqrt(0.95),static_verified,8674,1203,vehicle.lincoln.mkz_2020,hero,0.95,0.974679434,1,23,readback matched static command
+1779191161.630075,T3_k0.95_csqrt,T3 k=0.95 c=sqrt(0.95),static_verified,8724,1203,vehicle.lincoln.mkz_2020,hero,0.95,0.974679434,1,24,readback matched static command
+1779191174.319424,T3_k0.95_csqrt,T3 k=0.95 c=sqrt(0.95),static_verified,8774,1203,vehicle.lincoln.mkz_2020,hero,0.95,0.974679434,1,25,readback matched static command
+1779191186.306617,T3_k0.95_csqrt,T3 k=0.95 c=sqrt(0.95),static_verified,8824,1203,vehicle.lincoln.mkz_2020,hero,0.95,0.974679434,1,26,readback matched static command
+1779191192.454768,T3_k0.95_csqrt,T3 k=0.95 c=sqrt(0.95),actor_removed,8843,,,,0.95,0.974679434,,,actor 1203 disappeared
+1779191192.454794,T3_k0.95_csqrt,T3 k=0.95 c=sqrt(0.95),waiting_for_vehicle,8843,,,,0.95,0.974679434,,,no matching vehicle found
+1779191196.028554,T3_k0.95_csqrt,T3 k=0.95 c=sqrt(0.95),native_captured,8847,1424,vehicle.lincoln.mkz_2020,hero,0.95,0.974679434,0,0,captured native suspension
+1779191196.028601,T3_k0.95_csqrt,T3 k=0.95 c=sqrt(0.95),static_applied,8847,1424,vehicle.lincoln.mkz_2020,hero,0.95,0.974679434,1,0,applied static suspension command
+1779191196.031779,T3_k0.95_csqrt,T3 k=0.95 c=sqrt(0.95),static_verified,8847,1424,vehicle.lincoln.mkz_2020,hero,0.95,0.974679434,1,1,readback matched static command
+1779191201.055435,T3_k0.95_csqrt,T3 k=0.95 c=sqrt(0.95),runtime_error,,,,,0.95,0.974679434,,,"time-out of 5000ms while waiting for the simulator, make sure the simulator is ready and connected to 127.0.0.1:2000"
+1779191213.844949,T3_k0.95_csqrt,T3 k=0.95 c=sqrt(0.95),static_verified,8895,1424,vehicle.lincoln.mkz_2020,hero,0.95,0.974679434,1,2,readback matched static command
+1779191224.954113,T3_k0.95_csqrt,T3 k=0.95 c=sqrt(0.95),static_verified,8945,1424,vehicle.lincoln.mkz_2020,hero,0.95,0.974679434,1,3,readback matched static command
+1779191236.254167,T3_k0.95_csqrt,T3 k=0.95 c=sqrt(0.95),static_verified,8995,1424,vehicle.lincoln.mkz_2020,hero,0.95,0.974679434,1,4,readback matched static command
+1779191247.397465,T3_k0.95_csqrt,T3 k=0.95 c=sqrt(0.95),static_verified,9045,1424,vehicle.lincoln.mkz_2020,hero,0.95,0.974679434,1,5,readback matched static command
+1779191258.450951,T3_k0.95_csqrt,T3 k=0.95 c=sqrt(0.95),static_verified,9095,1424,vehicle.lincoln.mkz_2020,hero,0.95,0.974679434,1,6,readback matched static command
+1779191269.469212,T3_k0.95_csqrt,T3 k=0.95 c=sqrt(0.95),static_verified,9145,1424,vehicle.lincoln.mkz_2020,hero,0.95,0.974679434,1,7,readback matched static command
+1779191280.655217,T3_k0.95_csqrt,T3 k=0.95 c=sqrt(0.95),static_verified,9195,1424,vehicle.lincoln.mkz_2020,hero,0.95,0.974679434,1,8,readback matched static command
+1779191291.923714,T3_k0.95_csqrt,T3 k=0.95 c=sqrt(0.95),static_verified,9245,1424,vehicle.lincoln.mkz_2020,hero,0.95,0.974679434,1,9,readback matched static command
+1779191303.460989,T3_k0.95_csqrt,T3 k=0.95 c=sqrt(0.95),static_verified,9295,1424,vehicle.lincoln.mkz_2020,hero,0.95,0.974679434,1,10,readback matched static command
+1779191314.747828,T3_k0.95_csqrt,T3 k=0.95 c=sqrt(0.95),static_verified,9345,1424,vehicle.lincoln.mkz_2020,hero,0.95,0.974679434,1,11,readback matched static command
+1779191325.717608,T3_k0.95_csqrt,T3 k=0.95 c=sqrt(0.95),static_verified,9395,1424,vehicle.lincoln.mkz_2020,hero,0.95,0.974679434,1,12,readback matched static command
+1779191336.741140,T3_k0.95_csqrt,T3 k=0.95 c=sqrt(0.95),static_verified,9445,1424,vehicle.lincoln.mkz_2020,hero,0.95,0.974679434,1,13,readback matched static command
+1779191343.851598,T3_k0.95_csqrt,T3 k=0.95 c=sqrt(0.95),actor_removed,9474,,,,0.95,0.974679434,,,actor 1424 disappeared
+1779191343.851624,T3_k0.95_csqrt,T3 k=0.95 c=sqrt(0.95),waiting_for_vehicle,9474,,,,0.95,0.974679434,,,no matching vehicle found
+1779191344.894553,T3_k0.95_csqrt,T3 k=0.95 c=sqrt(0.95),stopped,,,,,0.95,0.974679434,,,sidecar stopped

@@ -1,0 +1,57 @@
+wall_time,scenario,label,event,frame,actor_id,type_id,role_name,spring_scale,damper_scale,apply_count,verify_count,message
+1779191892.543725,T5_k1.00_c1.10,T5 k=1.00 c=1.10,connected,,,,,1,1.1,,,connected to CARLA
+1779191892.564714,T5_k1.00_c1.10,T5 k=1.00 c=1.10,waiting_for_vehicle,12206,,,,1,1.1,,,no matching vehicle found
+1779191898.948620,T5_k1.00_c1.10,T5 k=1.00 c=1.10,runtime_error,,,,,1,1.1,,,"time-out of 5000ms while waiting for the simulator, make sure the simulator is ready and connected to 127.0.0.1:2000"
+1779191899.949543,T5_k1.00_c1.10,T5 k=1.00 c=1.10,waiting_for_vehicle,12291,,,,1,1.1,,,no matching vehicle found
+1779191905.286548,T5_k1.00_c1.10,T5 k=1.00 c=1.10,waiting_for_vehicle,12295,,,,1,1.1,,,no matching vehicle found
+1779191905.658255,T5_k1.00_c1.10,T5 k=1.00 c=1.10,native_captured,12296,1913,vehicle.lincoln.mkz_2020,hero,1,1.1,0,0,captured native suspension
+1779191905.658297,T5_k1.00_c1.10,T5 k=1.00 c=1.10,static_applied,12296,1913,vehicle.lincoln.mkz_2020,hero,1,1.1,1,0,applied static suspension command
+1779191905.658911,T5_k1.00_c1.10,T5 k=1.00 c=1.10,static_verified,12296,1913,vehicle.lincoln.mkz_2020,hero,1,1.1,1,1,readback matched static command
+1779191910.678794,T5_k1.00_c1.10,T5 k=1.00 c=1.10,runtime_error,,,,,1,1.1,,,"time-out of 5000ms while waiting for the simulator, make sure the simulator is ready and connected to 127.0.0.1:2000"
+1779191916.680150,T5_k1.00_c1.10,T5 k=1.00 c=1.10,runtime_error,,,,,1,1.1,,,"time-out of 5000ms while waiting for the simulator, make sure the simulator is ready and connected to 127.0.0.1:2000"
+1779191929.528558,T5_k1.00_c1.10,T5 k=1.00 c=1.10,static_verified,12355,1913,vehicle.lincoln.mkz_2020,hero,1,1.1,1,2,readback matched static command
+1779191942.774314,T5_k1.00_c1.10,T5 k=1.00 c=1.10,static_verified,12405,1913,vehicle.lincoln.mkz_2020,hero,1,1.1,1,3,readback matched static command
+1779191956.492025,T5_k1.00_c1.10,T5 k=1.00 c=1.10,static_verified,12455,1913,vehicle.lincoln.mkz_2020,hero,1,1.1,1,4,readback matched static command
+1779191970.274554,T5_k1.00_c1.10,T5 k=1.00 c=1.10,static_verified,12505,1913,vehicle.lincoln.mkz_2020,hero,1,1.1,1,5,readback matched static command
+1779191983.367162,T5_k1.00_c1.10,T5 k=1.00 c=1.10,static_verified,12555,1913,vehicle.lincoln.mkz_2020,hero,1,1.1,1,6,readback matched static command
+1779191997.478093,T5_k1.00_c1.10,T5 k=1.00 c=1.10,static_verified,12605,1913,vehicle.lincoln.mkz_2020,hero,1,1.1,1,7,readback matched static command
+1779192012.610708,T5_k1.00_c1.10,T5 k=1.00 c=1.10,static_verified,12655,1913,vehicle.lincoln.mkz_2020,hero,1,1.1,1,8,readback matched static command
+1779192028.207477,T5_k1.00_c1.10,T5 k=1.00 c=1.10,static_verified,12705,1913,vehicle.lincoln.mkz_2020,hero,1,1.1,1,9,readback matched static command
+1779192043.907403,T5_k1.00_c1.10,T5 k=1.00 c=1.10,static_verified,12755,1913,vehicle.lincoln.mkz_2020,hero,1,1.1,1,10,readback matched static command
+1779192059.197666,T5_k1.00_c1.10,T5 k=1.00 c=1.10,static_verified,12805,1913,vehicle.lincoln.mkz_2020,hero,1,1.1,1,11,readback matched static command
+1779192074.421585,T5_k1.00_c1.10,T5 k=1.00 c=1.10,static_verified,12855,1913,vehicle.lincoln.mkz_2020,hero,1,1.1,1,12,readback matched static command
+1779192090.322255,T5_k1.00_c1.10,T5 k=1.00 c=1.10,static_verified,12905,1913,vehicle.lincoln.mkz_2020,hero,1,1.1,1,13,readback matched static command
+1779192105.723285,T5_k1.00_c1.10,T5 k=1.00 c=1.10,static_verified,12955,1913,vehicle.lincoln.mkz_2020,hero,1,1.1,1,14,readback matched static command
+1779192121.587873,T5_k1.00_c1.10,T5 k=1.00 c=1.10,static_verified,13005,1913,vehicle.lincoln.mkz_2020,hero,1,1.1,1,15,readback matched static command
+1779192137.718570,T5_k1.00_c1.10,T5 k=1.00 c=1.10,static_verified,13055,1913,vehicle.lincoln.mkz_2020,hero,1,1.1,1,16,readback matched static command
+1779192153.658629,T5_k1.00_c1.10,T5 k=1.00 c=1.10,static_verified,13105,1913,vehicle.lincoln.mkz_2020,hero,1,1.1,1,17,readback matched static command
+1779192169.368660,T5_k1.00_c1.10,T5 k=1.00 c=1.10,static_verified,13155,1913,vehicle.lincoln.mkz_2020,hero,1,1.1,1,18,readback matched static command
+1779192184.660832,T5_k1.00_c1.10,T5 k=1.00 c=1.10,static_verified,13205,1913,vehicle.lincoln.mkz_2020,hero,1,1.1,1,19,readback matched static command
+1779192199.605147,T5_k1.00_c1.10,T5 k=1.00 c=1.10,static_verified,13255,1913,vehicle.lincoln.mkz_2020,hero,1,1.1,1,20,readback matched static command
+1779192215.568137,T5_k1.00_c1.10,T5 k=1.00 c=1.10,static_verified,13305,1913,vehicle.lincoln.mkz_2020,hero,1,1.1,1,21,readback matched static command
+1779192229.567890,T5_k1.00_c1.10,T5 k=1.00 c=1.10,static_verified,13355,1913,vehicle.lincoln.mkz_2020,hero,1,1.1,1,22,readback matched static command
+1779192242.010007,T5_k1.00_c1.10,T5 k=1.00 c=1.10,static_verified,13405,1913,vehicle.lincoln.mkz_2020,hero,1,1.1,1,23,readback matched static command
+1779192254.828130,T5_k1.00_c1.10,T5 k=1.00 c=1.10,static_verified,13455,1913,vehicle.lincoln.mkz_2020,hero,1,1.1,1,24,readback matched static command
+1779192267.291867,T5_k1.00_c1.10,T5 k=1.00 c=1.10,static_verified,13505,1913,vehicle.lincoln.mkz_2020,hero,1,1.1,1,25,readback matched static command
+1779192279.037134,T5_k1.00_c1.10,T5 k=1.00 c=1.10,static_verified,13555,1913,vehicle.lincoln.mkz_2020,hero,1,1.1,1,26,readback matched static command
+1779192283.017596,T5_k1.00_c1.10,T5 k=1.00 c=1.10,actor_removed,13568,,,,1,1.1,,,actor 1913 disappeared
+1779192283.017623,T5_k1.00_c1.10,T5 k=1.00 c=1.10,waiting_for_vehicle,13568,,,,1,1.1,,,no matching vehicle found
+1779192286.657704,T5_k1.00_c1.10,T5 k=1.00 c=1.10,native_captured,13572,2134,vehicle.lincoln.mkz_2020,hero,1,1.1,0,0,captured native suspension
+1779192286.657755,T5_k1.00_c1.10,T5 k=1.00 c=1.10,static_applied,13572,2134,vehicle.lincoln.mkz_2020,hero,1,1.1,1,0,applied static suspension command
+1779192286.659028,T5_k1.00_c1.10,T5 k=1.00 c=1.10,static_verified,13572,2134,vehicle.lincoln.mkz_2020,hero,1,1.1,1,1,readback matched static command
+1779192291.677713,T5_k1.00_c1.10,T5 k=1.00 c=1.10,runtime_error,,,,,1,1.1,,,"time-out of 5000ms while waiting for the simulator, make sure the simulator is ready and connected to 127.0.0.1:2000"
+1779192304.358487,T5_k1.00_c1.10,T5 k=1.00 c=1.10,static_verified,13620,2134,vehicle.lincoln.mkz_2020,hero,1,1.1,1,2,readback matched static command
+1779192315.546696,T5_k1.00_c1.10,T5 k=1.00 c=1.10,static_verified,13670,2134,vehicle.lincoln.mkz_2020,hero,1,1.1,1,3,readback matched static command
+1779192326.772705,T5_k1.00_c1.10,T5 k=1.00 c=1.10,static_verified,13720,2134,vehicle.lincoln.mkz_2020,hero,1,1.1,1,4,readback matched static command
+1779192338.100260,T5_k1.00_c1.10,T5 k=1.00 c=1.10,static_verified,13770,2134,vehicle.lincoln.mkz_2020,hero,1,1.1,1,5,readback matched static command
+1779192349.294708,T5_k1.00_c1.10,T5 k=1.00 c=1.10,static_verified,13820,2134,vehicle.lincoln.mkz_2020,hero,1,1.1,1,6,readback matched static command
+1779192360.429399,T5_k1.00_c1.10,T5 k=1.00 c=1.10,static_verified,13870,2134,vehicle.lincoln.mkz_2020,hero,1,1.1,1,7,readback matched static command
+1779192371.582494,T5_k1.00_c1.10,T5 k=1.00 c=1.10,static_verified,13920,2134,vehicle.lincoln.mkz_2020,hero,1,1.1,1,8,readback matched static command
+1779192382.831119,T5_k1.00_c1.10,T5 k=1.00 c=1.10,static_verified,13970,2134,vehicle.lincoln.mkz_2020,hero,1,1.1,1,9,readback matched static command
+1779192394.267050,T5_k1.00_c1.10,T5 k=1.00 c=1.10,static_verified,14020,2134,vehicle.lincoln.mkz_2020,hero,1,1.1,1,10,readback matched static command
+1779192405.435433,T5_k1.00_c1.10,T5 k=1.00 c=1.10,static_verified,14070,2134,vehicle.lincoln.mkz_2020,hero,1,1.1,1,11,readback matched static command
+1779192416.627272,T5_k1.00_c1.10,T5 k=1.00 c=1.10,static_verified,14120,2134,vehicle.lincoln.mkz_2020,hero,1,1.1,1,12,readback matched static command
+1779192427.738673,T5_k1.00_c1.10,T5 k=1.00 c=1.10,static_verified,14170,2134,vehicle.lincoln.mkz_2020,hero,1,1.1,1,13,readback matched static command
+1779192433.415636,T5_k1.00_c1.10,T5 k=1.00 c=1.10,actor_removed,14192,,,,1,1.1,,,actor 2134 disappeared
+1779192433.415662,T5_k1.00_c1.10,T5 k=1.00 c=1.10,waiting_for_vehicle,14192,,,,1,1.1,,,no matching vehicle found
+1779192434.478233,T5_k1.00_c1.10,T5 k=1.00 c=1.10,stopped,,,,,1,1.1,,,sidecar stopped
