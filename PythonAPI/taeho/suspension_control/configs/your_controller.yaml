@@ -1,0 +1,11 @@
+# Placeholder config for the future planning-preview controller.
+
+controller: planning_preview_placeholder
+wheel_count: 4
+
+# Future fields may include:
+# preview_horizon_seconds: 2.0
+# curvature_weight: 1.0
+# braking_weight: 1.0
+# roll_risk_weight: 1.0
+# comfort_risk_weight: 1.0

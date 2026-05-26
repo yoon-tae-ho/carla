@@ -1,0 +1,39 @@
+# Default config for controllers.pid.FeedbackPIDController.
+# Keys intentionally match FeedbackPIDConfig fields.
+
+default_dt: 0.05
+wheel_count: 4
+
+base_spring_scale: 1.0
+base_damper_scale: 1.0
+min_spring_scale: 0.90
+max_spring_scale: 1.10
+min_damper_scale: 0.80
+max_damper_scale: 1.30
+max_damper_delta_per_step: 0.04
+spring_gain_from_damper_delta: 0.0
+
+kp: 0.22
+ki: 0.015
+kd: 0.025
+integral_limit: 2.0
+integral_decay_when_quiet: 0.98
+
+activity_target: 0.04
+activity_deadband: 0.01
+
+roll_angle_scale: 5.0
+pitch_angle_scale: 4.0
+roll_rate_scale: 35.0
+pitch_rate_scale: 35.0
+lateral_acc_scale: 5.0
+vertical_acc_scale: 4.0
+lateral_acc_deadband: 0.15
+vertical_acc_deadband: 0.20
+
+roll_angle_weight: 0.35
+pitch_angle_weight: 0.25
+roll_rate_weight: 0.20
+pitch_rate_weight: 0.15
+lateral_acc_weight: 0.25
+vertical_acc_weight: 0.20
