@@ -60,7 +60,7 @@ DEFAULT_ROUTES = os.path.join(
     "carla_garage",
     "leaderboard",
     "data",
-    "routes_validation.xml",
+    "suspension_town13_short.xml",
 )
 DEFAULT_TFPP_OUTPUT_ROOT = os.path.join(
     SIM_ROOT, "e2e_models", "outputs", "transfuserpp")
@@ -1386,7 +1386,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--routes",
         default=DEFAULT_ROUTES,
-        help="routes XML path (default: routes_validation.xml)")
+        help="routes XML path (default: suspension_town13_short.xml)")
     parser.add_argument(
         "--routes-subset",
         default="",
