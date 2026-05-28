@@ -208,7 +208,12 @@ DIAGNOSTIC_FIELDS = (
     "skyhook_pitch_rate_rad",
 )
 
-ROUTE_METRIC_PREFIXES = ("comfort_", "stability_")
+ROUTE_METRIC_PREFIXES = (
+    "comfort_",
+    "stability_",
+    "warmup_excluded_comfort_",
+    "warmup_excluded_stability_",
+)
 
 
 def parse_scalar(value: str) -> Any:
@@ -990,6 +995,44 @@ def read_profile_groups(path: str) -> Tuple[List[Dict[str, Any]], OrderedDict]:
     return all_rows, groups
 
 
+def drop_warmup_rows(
+    rows: Sequence[Mapping[str, Any]],
+    warmup_seconds: float,
+) -> List[Mapping[str, Any]]:
+    if warmup_seconds <= 0.0 or not rows:
+        return list(rows)
+    first_elapsed = safe_float(rows[0].get("elapsed_seconds"))
+    if first_elapsed is None:
+        return list(rows)
+    cutoff = first_elapsed + warmup_seconds
+    filtered = []
+    for row in rows:
+        elapsed = safe_float(row.get("elapsed_seconds"))
+        if elapsed is not None and elapsed >= cutoff:
+            filtered.append(row)
+    return filtered if filtered else list(rows)
+
+
+def update_warmup_excluded_metrics(
+    metrics: Dict[str, Any],
+    rows: Sequence[Mapping[str, Any]],
+    warmup_seconds: float,
+    default_dt: float,
+    steady_fraction: float,
+) -> None:
+    filtered_rows = drop_warmup_rows(rows, warmup_seconds)
+    metrics["warmup_excluded_seconds"] = max(0.0, warmup_seconds)
+    metrics["warmup_excluded_profile_rows"] = len(filtered_rows)
+    metrics["warmup_excluded_start_elapsed_seconds"] = (
+        filtered_rows[0].get("elapsed_seconds", "") if filtered_rows else "")
+    metrics.update(prefixed_metrics(
+        "warmup_excluded_comfort_",
+        comfort_metrics(filtered_rows, default_dt=default_dt)))
+    metrics.update(prefixed_metrics(
+        "warmup_excluded_stability_",
+        stability_metrics(filtered_rows, steady_fraction=steady_fraction)))
+
+
 def compute_profile_metrics(
     scenario: Mapping[str, Any],
     seed: int,
@@ -997,6 +1040,7 @@ def compute_profile_metrics(
     metrics_path: str,
     default_dt: float,
     steady_fraction: float,
+    metric_warmup_seconds: float,
 ) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
     all_rows, groups = read_profile_groups(profile_path)
     episode_rows: List[Dict[str, Any]] = []
@@ -1021,6 +1065,12 @@ def compute_profile_metrics(
         metric_row.update(prefixed_metrics(
             "stability_",
             stability_metrics(rows, steady_fraction=steady_fraction)))
+        update_warmup_excluded_metrics(
+            metric_row,
+            rows,
+            metric_warmup_seconds,
+            default_dt,
+            steady_fraction)
         episode_rows.append(metric_row)
 
     preferred = (
@@ -1035,6 +1085,9 @@ def compute_profile_metrics(
         "end_frame",
         "start_elapsed_seconds",
         "end_elapsed_seconds",
+        "warmup_excluded_seconds",
+        "warmup_excluded_profile_rows",
+        "warmup_excluded_start_elapsed_seconds",
     )
     write_csv_rows(metrics_path, episode_rows, preferred)
 
@@ -1046,6 +1099,12 @@ def compute_profile_metrics(
         run_metrics.update(prefixed_metrics(
             "stability_",
             stability_metrics(all_rows, steady_fraction=steady_fraction)))
+        update_warmup_excluded_metrics(
+            run_metrics,
+            all_rows,
+            metric_warmup_seconds,
+            default_dt,
+            steady_fraction)
     return run_metrics, episode_rows
 
 
@@ -1190,7 +1249,8 @@ def run_scenario(
         profile_path,
         metrics_path,
         args.default_dt,
-        args.steady_fraction)
+        args.steady_fraction,
+        args.metric_warmup_seconds)
 
     if event_summary["sidecar_profile_rows"] == 0 and status == "ok":
         status = "sidecar_no_profile"
@@ -1268,6 +1328,16 @@ def write_suite_summary(output_dir: str, rows: Sequence[Mapping[str, Any]]) -> T
         "comfort_rms_lateral_jerk",
         "comfort_peak_abs_vertical_acc",
         "comfort_peak_abs_vertical_jerk",
+        "warmup_excluded_seconds",
+        "warmup_excluded_profile_rows",
+        "warmup_excluded_comfort_comfort_score",
+        "warmup_excluded_comfort_rms_vertical_acc",
+        "warmup_excluded_comfort_rms_lateral_acc",
+        "warmup_excluded_comfort_rms_longitudinal_acc",
+        "warmup_excluded_comfort_rms_vertical_jerk",
+        "warmup_excluded_comfort_rms_lateral_jerk",
+        "warmup_excluded_comfort_peak_abs_vertical_acc",
+        "warmup_excluded_comfort_peak_abs_vertical_jerk",
         "stability_peak_abs_roll",
         "stability_peak_abs_pitch",
         "stability_peak_abs_yaw_rate",
@@ -1276,6 +1346,14 @@ def write_suite_summary(output_dir: str, rows: Sequence[Mapping[str, Any]]) -> T
         "stability_rms_pitch",
         "stability_rms_yaw_rate",
         "stability_rms_lateral_acc",
+        "warmup_excluded_stability_peak_abs_roll",
+        "warmup_excluded_stability_peak_abs_pitch",
+        "warmup_excluded_stability_peak_abs_yaw_rate",
+        "warmup_excluded_stability_peak_abs_lateral_acc",
+        "warmup_excluded_stability_rms_roll",
+        "warmup_excluded_stability_rms_pitch",
+        "warmup_excluded_stability_rms_yaw_rate",
+        "warmup_excluded_stability_rms_lateral_acc",
         "duration_game",
         "duration_system",
         "duration_seconds",
@@ -1334,6 +1412,8 @@ def main(args: argparse.Namespace) -> None:
         "routes": expand_path(args.routes),
         "routes_subset": args.routes_subset,
         "repetitions": args.repetitions,
+        "metric_warmup_seconds": args.metric_warmup_seconds,
+        "steady_fraction": args.steady_fraction,
         "seeds": seeds,
         "scenarios": scenarios,
         "pid_config": expand_path(args.pid_config) if args.pid_config else "",
@@ -1441,6 +1521,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default=0.30,
         type=float,
         help="tail fraction for stability tail metrics (default: 0.30)")
+    parser.add_argument(
+        "--metric-warmup-seconds",
+        default=2.0,
+        type=float,
+        help="initial episode seconds excluded from warmup_excluded metrics "
+        "(default: 2.0; 0 disables exclusion)")
     parser.add_argument(
         "--verify-every",
         default=50,
