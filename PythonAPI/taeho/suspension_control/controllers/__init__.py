@@ -12,6 +12,7 @@ from .base import (
 )
 from .identity import IdentityController
 from .pid import FeedbackPIDConfig, FeedbackPIDController
+from .skyhook import SkyhookConfig, SkyhookController
 from .static_scale import StaticScaleController
 from .your_controller import PlanningPreviewSuspensionController
 
@@ -24,6 +25,8 @@ __all__ = [
     "PlanningInfo",
     "PlanningPoint",
     "PlanningPreviewSuspensionController",
+    "SkyhookConfig",
+    "SkyhookController",
     "StaticScaleController",
     "SuspensionCommand",
     "SuspensionController",

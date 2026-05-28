@@ -27,7 +27,7 @@ class FeedbackPIDConfig:
 
     The controller compresses body motion into one positive "activity" signal
     and runs PID on that signal. The result changes a uniform damper scale.
-    Spring scale stays at 1.0 unless `spring_gain_from_damper_delta` is nonzero.
+    Spring scale is intentionally frozen so PID experiments isolate damping.
     """
 
     default_dt: float = 0.05
@@ -40,6 +40,7 @@ class FeedbackPIDConfig:
     min_damper_scale: float = 0.80
     max_damper_scale: float = 1.30
     max_damper_delta_per_step: float = 0.04
+    # Kept for config compatibility; ignored while spring is frozen.
     spring_gain_from_damper_delta: float = 0.0
 
     kp: float = 0.22
@@ -130,11 +131,8 @@ class FeedbackPIDController(SuspensionController):
             cfg.max_damper_scale)
         desired_damper_scale = self._rate_limit_damper(desired_damper_scale)
 
-        spring_delta = (
-            desired_damper_scale - cfg.base_damper_scale) * (
-                cfg.spring_gain_from_damper_delta)
         spring_scale = clamp(
-            cfg.base_spring_scale + spring_delta,
+            cfg.base_spring_scale,
             cfg.min_spring_scale,
             cfg.max_spring_scale)
 

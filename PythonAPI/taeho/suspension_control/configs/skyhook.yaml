@@ -1,0 +1,17 @@
+# Default config for controllers.skyhook.SkyhookController.
+# Keys intentionally match SkyhookConfig fields.
+
+default_dt: 0.05
+wheel_count: 4
+
+# Spring is frozen at identity scale inside SkyhookController.
+base_damper_scale: 1.0
+min_damper_scale: 0.80
+max_damper_scale: 1.30
+max_damper_delta_per_step: 0.04
+
+half_track_m: 0.85
+half_wheelbase_m: 1.45
+corner_velocity_scale: 1.0
+corner_velocity_deadband: 0.02
+skyhook_gain: 0.25
