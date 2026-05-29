@@ -39,6 +39,10 @@ if SCRIPT_DIR not in sys.path:
 from suspension_control.controllers.base import ControllerContext, PlanningInfo
 from suspension_control.controllers.identity import IdentityController
 from suspension_control.controllers.pid import FeedbackPIDConfig, FeedbackPIDController
+from suspension_control.controllers.rl_residual import (
+    ResidualRLConfig,
+    ResidualRLController,
+)
 from suspension_control.controllers.skyhook import SkyhookConfig, SkyhookController
 from suspension_control.metrics.comfort import comfort_metrics
 from suspension_control.metrics.stability import stability_metrics
@@ -48,6 +52,10 @@ from suspension_control.runtime.carla_adapter import (
     read_suspension_scale_summary,
     read_vehicle_state,
     validate_suspension_control,
+)
+from suspension_control.runtime.planning_provider import (
+    make_planning_provider,
+    planning_diagnostics,
 )
 
 
@@ -68,6 +76,8 @@ DEFAULT_PID_CONFIG = os.path.join(
     SCRIPT_DIR, "suspension_control", "configs", "pid.yaml")
 DEFAULT_SKYHOOK_CONFIG = os.path.join(
     SCRIPT_DIR, "suspension_control", "configs", "skyhook.yaml")
+DEFAULT_RL_RESIDUAL_CONFIG = os.path.join(
+    SCRIPT_DIR, "suspension_control", "configs", "rl_residual.yaml")
 
 
 SCENARIOS = OrderedDict((
@@ -94,6 +104,25 @@ SCENARIOS = OrderedDict((
         "label": "S3 skyhook damping",
         "controller": "skyhook",
         "uses_suspension_api": True,
+    }),
+    ("rl_residual_skyhook", {
+        "name": "S4_rl_residual_skyhook",
+        "label": "S4 residual RL over skyhook",
+        "controller": "rl_residual",
+        "uses_suspension_api": True,
+    }),
+    ("rl_residual_pid", {
+        "name": "S5_rl_residual_pid",
+        "label": "S5 residual RL over PID",
+        "controller": "rl_residual_pid",
+        "uses_suspension_api": True,
+    }),
+    ("rl_residual_skyhook_no_planning", {
+        "name": "S6_rl_residual_skyhook_no_planning",
+        "label": "S6 residual RL over skyhook without planning",
+        "controller": "rl_residual_skyhook_no_planning",
+        "uses_suspension_api": True,
+        "force_empty_planning": True,
     }),
 ))
 
@@ -206,6 +235,61 @@ DIAGNOSTIC_FIELDS = (
     "skyhook_max_activity",
     "skyhook_roll_rate_rad",
     "skyhook_pitch_rate_rad",
+    "planning_available",
+    "planning_source",
+    "planning_frame",
+    "planning_age_frames",
+    "preview_curvature_now",
+    "preview_curvature_mean",
+    "preview_curvature_max_abs",
+    "preview_curvature_signed_peak",
+    "preview_target_speed_now",
+    "preview_target_speed_mean",
+    "preview_target_speed_min",
+    "preview_target_speed_max",
+    "preview_longitudinal_acc_mean",
+    "preview_longitudinal_acc_max_abs",
+    "preview_lateral_acc_mean",
+    "preview_lateral_acc_max_abs",
+    "preview_steer_now",
+    "preview_steer_mean",
+    "preview_steer_max_abs",
+    "preview_throttle_mean",
+    "preview_brake_mean",
+    "preview_brake_max",
+    "time_to_hard_brake",
+    "time_to_sharp_turn",
+    "time_to_high_lateral_acc",
+    "planning_jsonl_malformed_lines",
+    "planning_jsonl_rejected_messages",
+    "planning_jsonl_read_errors",
+    "rl_baseline",
+    "rl_policy_available",
+    "rl_policy_status",
+    "rl_observation_valid",
+    "rl_safety_gain",
+    "rl_fallback_reason",
+    "rl_action_fl",
+    "rl_action_fr",
+    "rl_action_rl",
+    "rl_action_rr",
+    "rl_residual_damper_fl",
+    "rl_residual_damper_fr",
+    "rl_residual_damper_rl",
+    "rl_residual_damper_rr",
+    "rl_baseline_damper_fl",
+    "rl_baseline_damper_fr",
+    "rl_baseline_damper_rl",
+    "rl_baseline_damper_rr",
+    "rl_final_damper_fl",
+    "rl_final_damper_fr",
+    "rl_final_damper_rl",
+    "rl_final_damper_rr",
+    "rl_planning_available",
+    "rl_observation_size",
+    "rl_observation_clip_count",
+    "rl_mean_abs_action",
+    "rl_mean_abs_residual_damper",
 )
 
 ROUTE_METRIC_PREFIXES = (
@@ -264,6 +348,22 @@ def build_skyhook_config(path: str) -> SkyhookConfig:
     return SkyhookConfig()
 
 
+def build_rl_residual_config(
+    args: argparse.Namespace,
+    baseline_override: str = "",
+) -> ResidualRLConfig:
+    values: Dict[str, Any] = {}
+    if args.rl_residual_config and os.path.isfile(args.rl_residual_config):
+        values.update(read_flat_yaml(args.rl_residual_config))
+    if args.rl_policy:
+        values["policy_path"] = expand_path(args.rl_policy)
+    if args.rl_normalizer:
+        values["normalizer_path"] = expand_path(args.rl_normalizer)
+    if baseline_override:
+        values["baseline"] = baseline_override
+    return ResidualRLConfig.from_mapping(values)
+
+
 def make_controller(controller_name: str, args: argparse.Namespace):
     if controller_name == "stock":
         return None
@@ -273,6 +373,12 @@ def make_controller(controller_name: str, args: argparse.Namespace):
         return FeedbackPIDController(build_pid_config(args.pid_config))
     if controller_name == "skyhook":
         return SkyhookController(build_skyhook_config(args.skyhook_config))
+    if controller_name == "rl_residual":
+        return ResidualRLController(build_rl_residual_config(args))
+    if controller_name == "rl_residual_pid":
+        return ResidualRLController(build_rl_residual_config(args, "pid"))
+    if controller_name == "rl_residual_skyhook_no_planning":
+        return ResidualRLController(build_rl_residual_config(args, "skyhook"))
     raise ValueError("unknown controller %s" % controller_name)
 
 
@@ -317,6 +423,12 @@ def selected_scenarios(value: str) -> List[Dict[str, Any]]:
             key = "pid"
         elif key.startswith("S3"):
             key = "skyhook"
+        elif key.startswith("S4"):
+            key = "rl_residual_skyhook"
+        elif key.startswith("S5"):
+            key = "rl_residual_pid"
+        elif key.startswith("S6"):
+            key = "rl_residual_skyhook_no_planning"
         if key not in SCENARIOS:
             raise ValueError(
                 "unknown scenario %s; choose from %s" %
@@ -416,6 +528,7 @@ class SuspensionExperimentSidecar(threading.Thread):
         self.verify_count_by_actor_id: Dict[int, int] = {}
         self.last_frame_by_actor_id: Dict[int, int] = {}
         self.next_episode_index = 0
+        self.planning_provider = make_planning_provider(args)
 
     def stop(self) -> None:
         self.stop_event.set()
@@ -597,10 +710,14 @@ class SuspensionExperimentSidecar(threading.Thread):
         previous_state = self.previous_state_by_actor_id.get(actor_id)
         current_suspension = actor.get_suspension_physics_control()
         dt = state.dt if state.dt > 0.0 else self.args.default_dt
+        if self.scenario.get("force_empty_planning", False):
+            planning = PlanningInfo.empty()
+        else:
+            planning = self.planning_provider.get(state.frame, state, previous_state)
         context = ControllerContext(
             state=state,
             previous_state=previous_state,
-            planning=PlanningInfo.empty(),
+            planning=planning,
             native_suspension=native,
             current_suspension=current_suspension,
             step=state.step,
@@ -668,6 +785,7 @@ class SuspensionExperimentSidecar(threading.Thread):
             "max_damper_scale_readback": readback_summary.get(
                 "max_damper_scale", ""),
         })
+        row.update(planning_diagnostics(planning, current_frame=state.frame))
         row.update(output.diagnostics)
         diagnostic_writer.writerow({
             field: format_value(row.get(field, ""))
@@ -828,6 +946,9 @@ def run_env(
     env["TRAFFIC_MANAGER_SEED"] = str(seed)
     env["TRAFFIC_MANAGER_PORT"] = str(args.traffic_manager_port)
     env["OUT_DIR"] = os.path.join(scenario_dir, "tfpp")
+    if args.planning_provider == "jsonl" and args.planning_preview_jsonl:
+        env["SUSPENSION_PLANNING_PREVIEW_JSONL"] = expand_path(
+            args.planning_preview_jsonl)
     if args.team_config:
         env["TEAM_CONFIG"] = expand_path(args.team_config)
     if args.team_agent:
@@ -976,6 +1097,66 @@ def count_csv_rows(path: str) -> int:
     with open(path) as csv_file:
         reader = csv.DictReader(csv_file)
         return sum(1 for _ in reader)
+
+
+def summarize_diagnostics_csv(path: str) -> Dict[str, Any]:
+    summary: Dict[str, Any] = {
+        "rl_policy_available_rows": 0,
+        "rl_fallback_reasons": "",
+        "rl_mean_safety_gain": "",
+        "rl_mean_abs_action": "",
+        "rl_mean_abs_residual_damper": "",
+        "rl_observation_clip_count_max": "",
+        "planning_available_rows": 0,
+        "planning_sources": "",
+    }
+    if not os.path.isfile(path):
+        return summary
+
+    fallback_reasons = set()
+    planning_sources = set()
+    safety_gains = []
+    abs_actions = []
+    abs_residuals = []
+    clip_counts = []
+
+    with open(path) as csv_file:
+        for row in csv.DictReader(csv_file):
+            policy_available = safe_float(row.get("rl_policy_available"))
+            if policy_available is not None and policy_available > 0.0:
+                summary["rl_policy_available_rows"] += 1
+            reason = row.get("rl_fallback_reason", "")
+            if reason:
+                fallback_reasons.add(reason)
+            planning_available = safe_float(row.get("planning_available"))
+            if planning_available is not None and planning_available > 0.0:
+                summary["planning_available_rows"] += 1
+            planning_source = row.get("planning_source", "")
+            if planning_source:
+                planning_sources.add(planning_source)
+            _append_float(safety_gains, row.get("rl_safety_gain"))
+            _append_float(abs_actions, row.get("rl_mean_abs_action"))
+            _append_float(abs_residuals, row.get("rl_mean_abs_residual_damper"))
+            _append_float(clip_counts, row.get("rl_observation_clip_count"))
+
+    summary["rl_fallback_reasons"] = ";".join(sorted(fallback_reasons))
+    summary["planning_sources"] = ";".join(sorted(planning_sources))
+    summary["rl_mean_safety_gain"] = _mean_or_empty(safety_gains)
+    summary["rl_mean_abs_action"] = _mean_or_empty(abs_actions)
+    summary["rl_mean_abs_residual_damper"] = _mean_or_empty(abs_residuals)
+    summary["rl_observation_clip_count_max"] = (
+        max(clip_counts) if clip_counts else "")
+    return summary
+
+
+def _append_float(values: List[float], value: Any) -> None:
+    number = safe_float(value)
+    if number is not None:
+        values.append(number)
+
+
+def _mean_or_empty(values: Sequence[float]) -> Any:
+    return sum(values) / float(len(values)) if values else ""
 
 
 def prefixed_metrics(prefix: str, metrics: Mapping[str, Any]) -> Dict[str, Any]:
@@ -1243,6 +1424,7 @@ def run_scenario(
     event_summary = summarize_events_csv(events_path)
     event_summary["sidecar_profile_rows"] = count_csv_rows(profile_path)
     event_summary["sidecar_diagnostic_rows"] = count_csv_rows(diagnostics_path)
+    diagnostic_summary = summarize_diagnostics_csv(diagnostics_path)
     profile_metrics, _ = compute_profile_metrics(
         scenario,
         seed,
@@ -1283,6 +1465,7 @@ def run_scenario(
     }
     row.update(result_metrics)
     row.update(event_summary)
+    row.update(diagnostic_summary)
     row.update(profile_metrics)
 
     write_json(os.path.join(scenario_dir, "summary.json"), row)
@@ -1320,6 +1503,14 @@ def write_suite_summary(output_dir: str, rows: Sequence[Mapping[str, Any]]) -> T
         "sidecar_command_verifies",
         "sidecar_fatal_errors",
         "sidecar_runtime_errors",
+        "rl_policy_available_rows",
+        "rl_fallback_reasons",
+        "rl_mean_safety_gain",
+        "rl_mean_abs_action",
+        "rl_mean_abs_residual_damper",
+        "rl_observation_clip_count_max",
+        "planning_available_rows",
+        "planning_sources",
         "comfort_comfort_score",
         "comfort_rms_vertical_acc",
         "comfort_rms_lateral_acc",
@@ -1417,6 +1608,12 @@ def main(args: argparse.Namespace) -> None:
         "seeds": seeds,
         "scenarios": scenarios,
         "pid_config": expand_path(args.pid_config) if args.pid_config else "",
+        "planning_provider": args.planning_provider,
+        "planning_preview_jsonl": (
+            expand_path(args.planning_preview_jsonl)
+            if args.planning_preview_jsonl else ""),
+        "planning_max_frame_lag": args.planning_max_frame_lag,
+        "planning_horizon_dt": args.planning_horizon_dt,
         "command": command,
     })
 
@@ -1488,7 +1685,9 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--scenarios",
         default="stock,identity,pid",
-        help="comma-separated scenarios: stock,identity,pid,skyhook "
+        help="comma-separated scenarios: stock,identity,pid,skyhook,"
+        "rl_residual_skyhook,rl_residual_pid,"
+        "rl_residual_skyhook_no_planning "
         "(default: stock,identity,pid)")
     parser.add_argument(
         "--baseline-scenario",
@@ -1511,6 +1710,37 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--skyhook-config",
         default=DEFAULT_SKYHOOK_CONFIG,
         help="flat YAML skyhook config path")
+    parser.add_argument(
+        "--rl-residual-config",
+        default=DEFAULT_RL_RESIDUAL_CONFIG,
+        help="flat YAML residual-RL config path")
+    parser.add_argument(
+        "--rl-policy",
+        default="",
+        help="optional residual-RL policy path override")
+    parser.add_argument(
+        "--rl-normalizer",
+        default="",
+        help="optional residual-RL normalizer JSON path override")
+    parser.add_argument(
+        "--planning-provider",
+        choices=("empty", "jsonl", "control_history"),
+        default="empty",
+        help="planning preview source for controller context (default: empty)")
+    parser.add_argument(
+        "--planning-preview-jsonl",
+        default="",
+        help="JSONL path used when --planning-provider=jsonl")
+    parser.add_argument(
+        "--planning-max-frame-lag",
+        default=5,
+        type=int,
+        help="maximum accepted stale planning frame lag (default: 5)")
+    parser.add_argument(
+        "--planning-horizon-dt",
+        default=0.1,
+        type=float,
+        help="fallback planning preview horizon dt in seconds (default: 0.1)")
     parser.add_argument(
         "--default-dt",
         default=0.05,

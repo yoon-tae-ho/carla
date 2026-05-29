@@ -154,15 +154,185 @@ class PlanningPoint:
 
 @dataclass(frozen=True)
 class PlanningInfo:
-    """Optional planning preview for future proactive controllers."""
+    """Optional planning preview for proactive controllers.
+
+    The original public contract was ``points``, ``source``, and ``metadata``.
+    Those fields stay intact while richer preview arrays live alongside them.
+    """
 
     points: Tuple[PlanningPoint, ...] = ()
-    source: str = ""
+    available: bool = False
+    source: str = "empty"
+    frame: int = -1
+    horizon_dt: float = 0.1
+
+    trajectory_xy: Tuple[Tuple[float, float], ...] = ()
+    trajectory_yaw: Tuple[float, ...] = ()
+    target_speed: Tuple[float, ...] = ()
+    curvature: Tuple[float, ...] = ()
+
+    steer: Tuple[float, ...] = ()
+    throttle: Tuple[float, ...] = ()
+    brake: Tuple[float, ...] = ()
+
+    predicted_ax: Tuple[float, ...] = ()
+    predicted_ay: Tuple[float, ...] = ()
+
+    route_deviation: Optional[float] = None
+    lane_invasion_count: int = 0
+    collision_count: int = 0
     metadata: Mapping[str, Any] = field(default_factory=dict)
+    extra: Mapping[str, Any] = field(default_factory=dict)
 
     @classmethod
     def empty(cls) -> "PlanningInfo":
         return cls()
+
+    def as_dict(self) -> Dict[str, Any]:
+        return {
+            "points": tuple(point.__dict__ for point in self.points),
+            "available": bool(self.available),
+            "source": self.source,
+            "frame": self.frame,
+            "horizon_dt": self.horizon_dt,
+            "trajectory_xy": self.trajectory_xy,
+            "trajectory_yaw": self.trajectory_yaw,
+            "target_speed": self.target_speed,
+            "curvature": self.curvature,
+            "steer": self.steer,
+            "throttle": self.throttle,
+            "brake": self.brake,
+            "predicted_ax": self.predicted_ax,
+            "predicted_ay": self.predicted_ay,
+            "route_deviation": self.route_deviation,
+            "lane_invasion_count": self.lane_invasion_count,
+            "collision_count": self.collision_count,
+            "metadata": dict(self.metadata or {}),
+            "extra": dict(self.extra or {}),
+        }
+
+    def preview_summary(self) -> Dict[str, float]:
+        curvatures = _planning_values(
+            self.curvature,
+            (point.curvature for point in self.points))
+        speeds = _planning_values(
+            self.target_speed,
+            (point.speed for point in self.points))
+        horizon_dt = max(_safe_float(self.horizon_dt, 0.1), 1.0e-6)
+        predicted_ax = _planning_values(
+            self.predicted_ax,
+            _speed_derivatives(speeds, horizon_dt))
+        predicted_ay = _planning_values(
+            self.predicted_ay,
+            (speed * speed * curvature
+             for speed, curvature in zip(speeds, curvatures)))
+        steer = _planning_values(self.steer, ())
+        throttle = _planning_values(self.throttle, ())
+        brake = _planning_values(self.brake, ())
+
+        available = bool(
+            self.available or
+            self.points or
+            self.trajectory_xy or
+            speeds or
+            curvatures or
+            steer or
+            throttle or
+            brake)
+
+        return {
+            "planning_available": 1.0 if available else 0.0,
+            "preview_curvature_now": curvatures[0] if curvatures else 0.0,
+            "preview_curvature_mean": mean_abs_signed(curvatures),
+            "preview_curvature_max_abs": _max_abs(curvatures),
+            "preview_curvature_signed_peak": _signed_peak(curvatures),
+            "preview_target_speed_now": speeds[0] if speeds else 0.0,
+            "preview_target_speed_mean": mean_abs_signed(speeds),
+            "preview_target_speed_min": min(speeds) if speeds else 0.0,
+            "preview_target_speed_max": max(speeds) if speeds else 0.0,
+            "preview_longitudinal_acc_mean": mean_abs_signed(predicted_ax),
+            "preview_longitudinal_acc_max_abs": _max_abs(predicted_ax),
+            "preview_lateral_acc_mean": mean_abs_signed(predicted_ay),
+            "preview_lateral_acc_max_abs": _max_abs(predicted_ay),
+            "preview_steer_now": steer[0] if steer else 0.0,
+            "preview_steer_mean": mean_abs_signed(steer),
+            "preview_steer_max_abs": _max_abs(steer),
+            "preview_throttle_mean": mean_abs_signed(throttle),
+            "preview_brake_mean": mean_abs_signed(brake),
+            "preview_brake_max": max(brake) if brake else 0.0,
+            "time_to_hard_brake": _time_to_threshold(
+                brake,
+                horizon_dt,
+                lambda value: value >= 0.25),
+            "time_to_sharp_turn": _time_to_threshold(
+                curvatures,
+                horizon_dt,
+                lambda value: abs(value) >= 0.04),
+            "time_to_high_lateral_acc": _time_to_threshold(
+                predicted_ay,
+                horizon_dt,
+                lambda value: abs(value) >= 2.5),
+        }
+
+
+def _safe_float(value: Any, default: float = 0.0) -> float:
+    try:
+        result = float(value)
+    except (TypeError, ValueError):
+        return default
+    return result if math.isfinite(result) else default
+
+
+def _planning_values(
+    primary: Sequence[float],
+    fallback: Sequence[float],
+) -> Tuple[float, ...]:
+    values = tuple(
+        _safe_float(value)
+        for value in (() if primary is None else primary))
+    if values:
+        return values
+    return tuple(_safe_float(value) for value in fallback)
+
+
+def _speed_derivatives(
+    speeds: Sequence[float],
+    horizon_dt: float,
+) -> Tuple[float, ...]:
+    if len(speeds) < 2:
+        return ()
+    return tuple(
+        (speeds[index + 1] - speeds[index]) / horizon_dt
+        for index in range(len(speeds) - 1))
+
+
+def mean_abs_signed(values: Sequence[float]) -> float:
+    if not values:
+        return 0.0
+    return sum(float(value) for value in values) / float(len(values))
+
+
+def _max_abs(values: Sequence[float]) -> float:
+    if not values:
+        return 0.0
+    return max(abs(float(value)) for value in values)
+
+
+def _signed_peak(values: Sequence[float]) -> float:
+    if not values:
+        return 0.0
+    return max((float(value) for value in values), key=lambda value: abs(value))
+
+
+def _time_to_threshold(
+    values: Sequence[float],
+    horizon_dt: float,
+    predicate: Any,
+) -> float:
+    for index, value in enumerate(values):
+        if predicate(float(value)):
+            return float(index) * horizon_dt
+    return 0.0
 
 
 @dataclass(frozen=True)

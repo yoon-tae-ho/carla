@@ -12,6 +12,7 @@ from .controllers.base import (
 )
 from .controllers.identity import IdentityController
 from .controllers.pid import FeedbackPIDConfig, FeedbackPIDController
+from .controllers.rl_residual import ResidualRLConfig, ResidualRLController
 from .controllers.skyhook import SkyhookConfig, SkyhookController
 from .controllers.static_scale import StaticScaleController
 from .controllers.your_controller import PlanningPreviewSuspensionController
@@ -25,6 +26,8 @@ __all__ = [
     "PlanningInfo",
     "PlanningPoint",
     "PlanningPreviewSuspensionController",
+    "ResidualRLConfig",
+    "ResidualRLController",
     "SkyhookConfig",
     "SkyhookController",
     "StaticScaleController",
