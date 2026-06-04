@@ -21,6 +21,14 @@ from .planning_provider import (
     planning_diagnostics,
     planning_info_from_mapping,
 )
+from .route_progress import (
+    ROUTE_PROGRESS_FIELDS,
+    RoutePolyline,
+    RouteProgressTracker,
+    load_route_polyline,
+    project_point_to_polyline,
+    unavailable_route_progress,
+)
 
 __all__ = [
     "CollisionObserver",
@@ -39,7 +47,13 @@ __all__ = [
     "make_planning_provider",
     "planning_diagnostics",
     "planning_info_from_mapping",
+    "ROUTE_PROGRESS_FIELDS",
+    "RoutePolyline",
+    "RouteProgressTracker",
+    "load_route_polyline",
+    "project_point_to_polyline",
     "read_suspension_scale_summary",
+    "unavailable_route_progress",
     "read_vehicle_state",
     "validate_suspension_control",
 ]

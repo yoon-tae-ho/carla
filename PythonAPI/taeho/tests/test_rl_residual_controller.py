@@ -89,13 +89,51 @@ def test_missing_policy_returns_skyhook_baseline_exactly():
     assert output.diagnostics["rl_fallback_reason"] == "policy_unavailable"
 
 
+def test_missing_policy_fallback_fills_phase2c_residual_diagnostics():
+    output = ResidualRLController(
+        ResidualRLConfig(allow_untrained_policy=False)).compute(context())
+
+    for label in ("fl", "fr", "rl", "rr"):
+        assert output.diagnostics["rl_raw_residual_damper_%s" % label] == 0.0
+        assert output.diagnostics[
+            "rl_safety_scaled_residual_damper_%s" % label] == 0.0
+        assert output.diagnostics[
+            "rl_rate_limited_residual_damper_%s" % label] == 0.0
+        assert output.diagnostics["rl_final_residual_damper_%s" % label] == 0.0
+
+
 def test_dummy_zero_policy_returns_skyhook_baseline_exactly():
     ctx = context()
     baseline = SkyhookController().compute(ctx).command
     output = ResidualRLController(
         ResidualRLConfig(allow_untrained_policy=True)).compute(ctx)
     assert output.command.is_close(baseline)
-    assert output.diagnostics["rl_fallback_reason"] == "zero_residual"
+    assert output.diagnostics["rl_fallback_reason"] == ""
+    assert output.diagnostics["rl_mean_abs_action"] == 0.0
+    assert output.diagnostics["rl_mean_abs_residual_damper"] == 0.0
+
+
+def test_dummy_zero_policy_is_not_safety_fallback_at_low_speed():
+    ctx = context(state(speed=0.0))
+    baseline = SkyhookController().compute(ctx).command
+    output = ResidualRLController(
+        ResidualRLConfig(allow_untrained_policy=True)).compute(ctx)
+    assert output.command.is_close(baseline)
+    assert output.diagnostics["rl_safety_gain"] == 0.0
+    assert output.diagnostics["rl_safety_gate_active"] == 1
+    assert output.diagnostics["rl_safety_gate_reason"] == "speed_below_min"
+    assert output.diagnostics["rl_fallback_reason"] == ""
+
+
+def test_safety_gate_logs_yaw_rate_limit():
+    ctx = context(state(speed=8.0))
+    yaw_state = VehicleState(**dict(ctx.state.as_dict(), yaw_rate=120.0))
+    output = ResidualRLController(
+        ResidualRLConfig(allow_untrained_policy=True)).compute(
+            context(yaw_state))
+    assert output.diagnostics["rl_safety_gate_active"] == 1
+    assert output.diagnostics["rl_safety_gate_yaw_rate_limit"] == 1
+    assert "yaw_rate_limit" in output.diagnostics["rl_safety_gate_reason"]
 
 
 def test_exact_fallback_bypasses_projection_and_clamping():
@@ -122,6 +160,9 @@ def test_fake_policy_produces_bounded_residual_and_frozen_springs():
         assert 0.80 <= wheel.damper_scale <= 1.30
         assert wheel.spring_scale == 1.0
     assert output.diagnostics["rl_fallback_reason"] == ""
+    assert output.diagnostics["rl_mean_action"] == 0.0
+    assert output.diagnostics["rl_mean_abs_action"] == 0.75
+    assert output.diagnostics["rl_mean_residual_damper"] == 0.0
 
 
 def test_non_finite_action_triggers_baseline_fallback():
@@ -133,6 +174,9 @@ def test_non_finite_action_triggers_baseline_fallback():
     output = controller.compute(ctx)
     assert output.command.is_close(baseline)
     assert output.diagnostics["rl_fallback_reason"] == "policy_action_non_finite"
+    assert output.diagnostics["rl_safety_gate_active"] == 1
+    assert output.diagnostics["rl_safety_gate_action_invalid"] == 1
+    assert "action_invalid" in output.diagnostics["rl_safety_gate_reason"]
 
 
 def test_rate_limit_enforced_across_compute_calls():

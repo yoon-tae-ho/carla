@@ -3,7 +3,95 @@
 from __future__ import annotations
 
 import os
+import random
 from typing import Any, List, Sequence
+
+
+BUILTIN_POLICY_ALIASES = {
+    "dummy_zero": "zero",
+    "zero": "zero",
+    "builtin_zero": "zero",
+    "builtin:zero": "zero",
+    "builtin://zero": "zero",
+    "const_action_plus_0p02": "const_action_plus_0p02",
+    "builtin:const_action_plus_0p02": "const_action_plus_0p02",
+    "builtin://const_action_plus_0p02": "const_action_plus_0p02",
+    "const_action_minus_0p02": "const_action_minus_0p02",
+    "builtin:const_action_minus_0p02": "const_action_minus_0p02",
+    "builtin://const_action_minus_0p02": "const_action_minus_0p02",
+    "const_action_plus_0p10": "const_action_plus_0p10",
+    "builtin:const_action_plus_0p10": "const_action_plus_0p10",
+    "builtin://const_action_plus_0p10": "const_action_plus_0p10",
+    "const_action_minus_0p10": "const_action_minus_0p10",
+    "builtin:const_action_minus_0p10": "const_action_minus_0p10",
+    "builtin://const_action_minus_0p10": "const_action_minus_0p10",
+    "const_action_plus_0p25": "const_action_plus_0p25",
+    "builtin:const_action_plus_0p25": "const_action_plus_0p25",
+    "builtin://const_action_plus_0p25": "const_action_plus_0p25",
+    "const_action_minus_0p25": "const_action_minus_0p25",
+    "builtin:const_action_minus_0p25": "const_action_minus_0p25",
+    "builtin://const_action_minus_0p25": "const_action_minus_0p25",
+    "random_action_0p02": "random_action_0p02",
+    "builtin:random_action_0p02": "random_action_0p02",
+    "builtin://random_action_0p02": "random_action_0p02",
+    "random_action_0p10": "random_action_0p10",
+    "builtin:random_action_0p10": "random_action_0p10",
+    "builtin://random_action_0p10": "random_action_0p10",
+    "const_plus_0p02": "const_action_plus_0p02",
+    "constant_plus_0p02": "const_action_plus_0p02",
+    "builtin_const_plus_0p02": "const_action_plus_0p02",
+    "builtin:const_plus_0p02": "const_action_plus_0p02",
+    "builtin://const_plus_0p02": "const_action_plus_0p02",
+    "const_minus_0p02": "const_action_minus_0p02",
+    "constant_minus_0p02": "const_action_minus_0p02",
+    "builtin_const_minus_0p02": "const_action_minus_0p02",
+    "builtin:const_minus_0p02": "const_action_minus_0p02",
+    "builtin://const_minus_0p02": "const_action_minus_0p02",
+    "random_small": "random_action_0p02",
+    "random_small_0p02": "random_action_0p02",
+    "builtin_random_small": "random_action_0p02",
+    "builtin_random_small_0p02": "random_action_0p02",
+    "builtin:random_small": "random_action_0p02",
+    "builtin:random_small_0p02": "random_action_0p02",
+    "builtin://random_small": "random_action_0p02",
+    "builtin://random_small_0p02": "random_action_0p02",
+}
+
+DEPRECATED_BUILTIN_POLICY_ALIASES = {
+    "const_plus_0p02",
+    "constant_plus_0p02",
+    "builtin_const_plus_0p02",
+    "builtin:const_plus_0p02",
+    "builtin://const_plus_0p02",
+    "const_minus_0p02",
+    "constant_minus_0p02",
+    "builtin_const_minus_0p02",
+    "builtin:const_minus_0p02",
+    "builtin://const_minus_0p02",
+    "random_small",
+    "random_small_0p02",
+    "builtin_random_small",
+    "builtin_random_small_0p02",
+    "builtin:random_small",
+    "builtin:random_small_0p02",
+    "builtin://random_small",
+    "builtin://random_small_0p02",
+}
+
+BUILTIN_CONSTANT_VALUES = {
+    "zero": 0.0,
+    "const_action_plus_0p02": 0.02,
+    "const_action_minus_0p02": -0.02,
+    "const_action_plus_0p10": 0.10,
+    "const_action_minus_0p10": -0.10,
+    "const_action_plus_0p25": 0.25,
+    "const_action_minus_0p25": -0.25,
+}
+
+BUILTIN_RANDOM_AMPLITUDES = {
+    "random_action_0p02": 0.02,
+    "random_action_0p10": 0.10,
+}
 
 
 class PolicyAdapter:
@@ -21,13 +109,16 @@ class PolicyAdapter:
         self._module = None
         self._torch = None
         self._dummy_zero = False
+        self.builtin_id = ""
+        self.alias_deprecated = False
+        self._rng = random.Random(0)
         self.status = "unavailable"
         self.error = ""
         self._load()
 
     @property
     def is_available(self) -> bool:
-        return self._dummy_zero or self._module is not None
+        return bool(self.builtin_id) or self._module is not None
 
     def predict(
         self,
@@ -35,8 +126,15 @@ class PolicyAdapter:
         deterministic: bool = True,
     ) -> List[float]:
         del deterministic
-        if self._dummy_zero:
-            return [0.0 for _ in range(self.action_dim)]
+        if self.builtin_id in BUILTIN_CONSTANT_VALUES:
+            value = BUILTIN_CONSTANT_VALUES[self.builtin_id]
+            return [value for _ in range(self.action_dim)]
+        if self.builtin_id in BUILTIN_RANDOM_AMPLITUDES:
+            amplitude = BUILTIN_RANDOM_AMPLITUDES[self.builtin_id]
+            return [
+                self._rng.uniform(-amplitude, amplitude)
+                for _ in range(self.action_dim)
+            ]
         if self._module is None or self._torch is None:
             raise RuntimeError(self.error or "policy unavailable")
         torch = self._torch
@@ -48,6 +146,10 @@ class PolicyAdapter:
             if isinstance(output, (tuple, list)):
                 output = output[0]
             values = output.reshape(-1).detach().cpu().tolist()
+        if len(values) != self.action_dim:
+            raise RuntimeError(
+                "policy_action_shape_mismatch: expected %d values, got %d" %
+                (self.action_dim, len(values)))
         return [float(value) for value in values]
 
     def diagnostics(self) -> dict:
@@ -56,11 +158,25 @@ class PolicyAdapter:
             "policy_status": self.status,
             "policy_error": self.error,
             "policy_dummy_zero": int(self._dummy_zero),
+            "policy_builtin_id": self.builtin_id,
+            "policy_alias_deprecated": int(self.alias_deprecated),
         }
 
     def _load(self) -> None:
+        normalized_path = self.policy_path.strip().lower()
+        builtin_id = BUILTIN_POLICY_ALIASES.get(normalized_path, "")
+        if builtin_id:
+            self.builtin_id = builtin_id
+            self.alias_deprecated = normalized_path in DEPRECATED_BUILTIN_POLICY_ALIASES
+            self._dummy_zero = builtin_id == "zero"
+            self.status = (
+                "dummy_zero_loaded"
+                if builtin_id == "zero"
+                else "%s_loaded" % builtin_id)
+            return
         if not self.policy_path:
             if self.allow_dummy_zero:
+                self.builtin_id = "zero"
                 self._dummy_zero = True
                 self.status = "dummy_zero"
             else:
@@ -69,6 +185,7 @@ class PolicyAdapter:
             return
         if not os.path.isfile(self.policy_path):
             if self.allow_dummy_zero:
+                self.builtin_id = "zero"
                 self._dummy_zero = True
                 self.status = "dummy_zero_missing_file"
             else:

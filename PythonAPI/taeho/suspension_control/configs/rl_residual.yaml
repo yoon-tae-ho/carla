@@ -18,6 +18,7 @@ min_speed_for_policy: 0.5
 max_abs_roll_for_full_policy: 6.0
 max_abs_pitch_for_full_policy: 6.0
 max_abs_lateral_acc_for_full_policy: 7.0
+max_abs_yaw_rate_for_full_policy: 60.0
 invalid_observation_fallback: true
 invalid_policy_fallback: true
 observation_clip: 5.0

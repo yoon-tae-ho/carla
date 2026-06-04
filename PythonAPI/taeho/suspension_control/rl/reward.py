@@ -6,13 +6,15 @@ import math
 from dataclasses import dataclass, fields
 from typing import Any, Dict, Mapping, Optional, Sequence, Tuple
 
+from .task_info import normalize_task_info
+
 
 @dataclass(frozen=True)
 class SuspensionRewardConfig:
     alive_bonus: float = 1.0
     comfort_weight: float = 1.0
     stability_weight: float = 1.0
-    task_weight: float = 2.0
+    task_weight: float = 1.0
     action_weight: float = 0.25
     safety_weight: float = 4.0
 
@@ -23,7 +25,25 @@ class SuspensionRewardConfig:
     yaw_rate_scale: float = 60.0
     action_scale: float = 1.0
     damper_scale: float = 1.0
-    route_deviation_scale: float = 2.0
+    route_deviation_scale: float = 8.0
+    delta_progress_scale: float = 0.01
+    min_delta_progress: float = 0.001
+    target_speed_error_scale: float = 8.0
+    t_route_deviation: float = 0.0
+    t_low_speed_not_planned: float = 0.50
+    t_progress_stall: float = 0.5
+    t_negative_progress: float = 0.0
+    t_abs_speed_error: float = 0.05
+    t_lane_invasion: float = 2.0
+    t_collision: float = 10.0
+    t_red_light: float = 5.0
+    t_route_timeout: float = 5.0
+    t_blocked_vehicle: float = 2.0
+    speed_error_scale: float = 8.0
+    progress_rate_scale: float = 5.0
+    reward_route_deviation_enabled: bool = False
+    reward_route_deviation_valid_threshold_m: float = 8.0
+    reward_task_abs_max_without_infraction: float = 2.0
 
     c_abs_az: float = 1.00
     c_abs_lat_acc: float = 0.25
@@ -45,7 +65,14 @@ class SuspensionRewardConfig:
     a_action_rate: float = 0.30
     a_damper_rate: float = 0.20
     a_baseline_dev: float = 0.25
+    a_residual_damper_mag: float = 0.35
+    a_residual_damper_rate: float = 0.20
+    a_final_damper_rate: float = 0.20
     a_spring_dev: float = 1.00
+
+    safety_gate_active_penalty: float = 0.25
+    safety_gain_loss_penalty: float = 0.50
+    observation_clip_penalty: float = 0.05
 
     terminal_collision_penalty: float = 20.0
     terminal_route_failure_penalty: float = 20.0
@@ -64,6 +91,7 @@ class RewardTransition:
     previous_state: Optional[Any] = None
     action: Sequence[float] = ()
     previous_action: Sequence[float] = ()
+    previous_final_damper_scales: Sequence[float] = ()
     final_command: Any = None
     baseline_command: Any = None
     task_info: Mapping[str, Any] = None
@@ -86,11 +114,11 @@ class SuspensionReward:
         action_terms = self._action_terms(transition)
         safety_terms = self._safety_terms(transition)
 
-        comfort = sum(comfort_terms.values())
-        stability = sum(stability_terms.values())
-        task = sum(task_terms.values())
-        action = sum(action_terms.values())
-        safety = sum(safety_terms.values())
+        comfort = _sum_reward_terms(comfort_terms)
+        stability = _sum_reward_terms(stability_terms)
+        task = _sum_reward_terms(task_terms)
+        action = _sum_reward_terms(action_terms)
+        safety = _sum_reward_terms(safety_terms)
         reward = (
             cfg.alive_bonus -
             cfg.comfort_weight * comfort -
@@ -118,6 +146,7 @@ class SuspensionReward:
         diagnostics.update(task_terms)
         diagnostics.update(action_terms)
         diagnostics.update(safety_terms)
+        diagnostics.update(_action_diagnostics(transition))
         return reward, diagnostics
 
     def _comfort_terms(self, transition: RewardTransition) -> Dict[str, float]:
@@ -176,55 +205,151 @@ class SuspensionReward:
 
     def _task_terms(self, transition: RewardTransition) -> Dict[str, float]:
         cfg = self.config
-        info = dict(transition.task_info or {})
-        return {
-            "reward_term_route_deviation": _norm_abs(
-                info.get("route_deviation", 0.0),
-                cfg.route_deviation_scale),
-            "reward_term_lane_invasion": _nonnegative(
-                info.get("lane_invasion_count", 0.0)),
-            "reward_term_collision": _nonnegative(
-                info.get("collision_count", 0.0)),
-            "reward_term_red_light": _nonnegative(
-                info.get("red_light_count", 0.0)),
-            "reward_term_blocked_vehicle": _nonnegative(
-                info.get("blocked_vehicle", 0.0)),
-            "reward_term_low_speed_not_planned": _nonnegative(
-                info.get("low_speed_not_planned", 0.0)),
-            "reward_term_route_timeout": _nonnegative(
-                info.get("route_timeout", 0.0)),
+        info = normalize_task_info(
+            transition.task_info or {},
+            require_non_empty=False)
+        target_speed = _nonnegative(info.get("target_speed", 0.0))
+        planned_stop = (
+            _nonnegative(info.get("planned_stop", 0.0)) > 0.0 or
+            target_speed <= 0.5)
+        delta_progress = _float(info.get("route_progress_delta_m",
+                                         info.get("delta_progress", 0.0)))
+        abs_speed_error = _nonnegative(info.get("abs_speed_error", 0.0))
+        if abs_speed_error <= 0.0:
+            abs_speed_error = abs(_float(info.get("target_speed_error", 0.0)))
+        target_speed_error_term = (
+            0.0
+            if planned_stop
+            else cfg.t_abs_speed_error * abs_speed_error /
+            max(abs(cfg.target_speed_error_scale), 1.0e-9))
+        low_speed_severity = _nonnegative(
+            info.get("low_speed_not_planned_severity",
+                     info.get("low_speed_not_planned", 0.0)))
+        if low_speed_severity <= 0.0:
+            low_speed_severity = _nonnegative(info.get("low_speed_not_planned", 0.0))
+        route_deviation = _float(info.get("route_deviation_m",
+                                          info.get("route_deviation", 0.0)))
+        route_deviation_valid = (
+            _nonnegative(info.get("route_deviation_valid", 0.0)) > 0.0 and
+            abs(route_deviation) <=
+            max(0.0, cfg.reward_route_deviation_valid_threshold_m))
+        route_deviation_enabled = bool(cfg.reward_route_deviation_enabled)
+        route_deviation_used = route_deviation_enabled and route_deviation_valid
+        negative_progress_term = (
+            cfg.t_negative_progress *
+            _nonnegative(info.get("negative_progress", 0.0)))
+        terms = {
+            "reward_term_negative_progress": negative_progress_term,
+            "reward_term_insufficient_progress": (
+                _norm_positive(
+                    cfg.min_delta_progress - delta_progress,
+                    cfg.delta_progress_scale)
+                if not planned_stop else 0.0),
+            "reward_term_target_speed_error": target_speed_error_term,
+            "reward_term_abs_speed_error": target_speed_error_term,
+            "reward_term_route_deviation": (
+                cfg.t_route_deviation *
+                _norm_abs(route_deviation, cfg.route_deviation_scale)
+                if route_deviation_used else 0.0),
+            "reward_term_lane_invasion": (
+                cfg.t_lane_invasion *
+                _nonnegative(info.get("lane_invasion_count", 0.0))),
+            "reward_term_collision": (
+                cfg.t_collision *
+                _nonnegative(info.get("collision_count", 0.0))),
+            "reward_term_red_light": (
+                cfg.t_red_light *
+                _nonnegative(info.get("red_light_count", 0.0))),
+            "reward_term_blocked_vehicle": (
+                cfg.t_blocked_vehicle *
+                _nonnegative(info.get("blocked_vehicle", 0.0))),
+            "reward_term_low_speed_not_planned": (
+                cfg.t_low_speed_not_planned * low_speed_severity),
+            "reward_term_progress_stall": (
+                cfg.t_progress_stall *
+                _nonnegative(info.get("progress_stall", 0.0))),
+            "reward_term_route_timeout": (
+                cfg.t_route_timeout *
+                _nonnegative(info.get("route_timeout", 0.0))),
+            "reward_route_deviation_used": 1.0 if route_deviation_used else 0.0,
+            "reward_route_deviation_enabled": (
+                1.0 if route_deviation_enabled else 0.0),
+            "reward_route_deviation_valid": (
+                1.0 if route_deviation_valid else 0.0),
+            "reward_task_capped_without_infraction": 0.0,
+            "reward_task_abs_max_without_infraction": (
+                cfg.reward_task_abs_max_without_infraction),
         }
+        if not _has_task_infraction(info):
+            cap = max(0.0, cfg.reward_task_abs_max_without_infraction)
+            total = _sum_reward_terms(terms)
+            if cap > 0.0 and total > cap:
+                scale = cap / max(total, 1.0e-9)
+                for key in tuple(terms):
+                    if key.startswith("reward_term_"):
+                        terms[key] *= scale
+                terms["reward_task_capped_without_infraction"] = 1.0
+        return terms
 
     def _action_terms(self, transition: RewardTransition) -> Dict[str, float]:
         cfg = self.config
+        diagnostics = dict(transition.diagnostics or {})
         action = _float_list(transition.action)
         previous_action = _float_list(transition.previous_action)
         final_dampers = _command_values(transition.final_command, "damper_scale")
         baseline_dampers = _command_values(transition.baseline_command, "damper_scale")
         final_springs = _command_values(transition.final_command, "spring_scale")
+        previous_final_dampers = _float_list(transition.previous_final_damper_scales)
+        action_rate = _mean_abs_diff(action, previous_action)
+        baseline_deviation = _mean_abs_diff(final_dampers, baseline_dampers)
+        residual_mag = _nonnegative(
+            diagnostics.get("rl_mean_abs_residual_damper", baseline_deviation))
+        residual_rate = _mean_abs(_diagnostic_wheel_values(
+            diagnostics,
+            "rl_rate_limited_residual_damper_"))
+        final_damper_rate = (
+            _mean_abs_diff(final_dampers, previous_final_dampers)
+            if previous_final_dampers
+            else 0.0)
         return {
             "reward_term_action_mag": cfg.a_action_mag * _mean_abs(action),
-            "reward_term_action_rate": cfg.a_action_rate * _mean_abs_diff(
-                action,
-                previous_action),
+            "reward_term_action_rate": cfg.a_action_rate * action_rate,
             "reward_term_damper_rate": cfg.a_damper_rate * _mean_abs_diff(
                 final_dampers,
                 baseline_dampers),
-            "reward_term_baseline_dev": cfg.a_baseline_dev * _mean_abs_diff(
-                final_dampers,
-                baseline_dampers),
+            "reward_term_baseline_dev": cfg.a_baseline_dev * baseline_deviation,
+            "reward_term_residual_damper_mag": (
+                cfg.a_residual_damper_mag * residual_mag),
+            "reward_term_residual_damper_rate": (
+                cfg.a_residual_damper_rate * residual_rate),
+            "reward_term_final_damper_rate": (
+                cfg.a_final_damper_rate * final_damper_rate),
             "reward_term_spring_dev": cfg.a_spring_dev * _mean_abs_diff(
                 final_springs,
                 [1.0 for _ in final_springs]),
         }
 
     def _safety_terms(self, transition: RewardTransition) -> Dict[str, float]:
-        info = dict(transition.task_info or {})
+        info = normalize_task_info(
+            transition.task_info or {},
+            require_non_empty=False)
+        diagnostics = dict(transition.diagnostics or {})
         state_values = getattr(transition.state, "as_dict", lambda: {})().values()
         nonfinite = any(
             isinstance(value, (int, float)) and not math.isfinite(float(value))
             for value in state_values)
         return {
+            "reward_term_safety_gate_active": (
+                self.config.safety_gate_active_penalty
+                if _nonnegative(diagnostics.get("rl_safety_gate_active", 0.0)) > 0.0
+                else 0.0),
+            "reward_term_safety_gain_loss": (
+                self.config.safety_gain_loss_penalty *
+                max(0.0, 1.0 - _float(diagnostics.get("rl_safety_gain", 1.0)))),
+            "reward_term_observation_clip_count": (
+                self.config.observation_clip_penalty *
+                _nonnegative(diagnostics.get("observation_clip_count",
+                                             diagnostics.get("rl_observation_clip_count", 0.0)))),
             "reward_term_terminal_collision": (
                 self.config.terminal_collision_penalty
                 if transition.terminal and _nonnegative(info.get("collision_count", 0.0)) > 0.0
@@ -236,6 +361,26 @@ class SuspensionReward:
             "reward_term_nonfinite": (
                 self.config.terminal_nonfinite_penalty if nonfinite else 0.0),
         }
+
+
+def _sum_reward_terms(terms: Mapping[str, Any]) -> float:
+    return sum(
+        _float(value)
+        for key, value in terms.items()
+        if str(key).startswith("reward_term_"))
+
+
+def _has_task_infraction(info: Mapping[str, Any]) -> bool:
+    return any(
+        _nonnegative(info.get(name, 0.0)) > 0.0
+        for name in (
+            "lane_invasion_count",
+            "collision_count",
+            "red_light_count",
+            "blocked_vehicle",
+            "route_timeout",
+            "route_failed",
+        ))
 
 
 def _get(obj: Any, name: str, default: float = 0.0) -> float:
@@ -259,6 +404,10 @@ def _float_list(values: Sequence[float]) -> Tuple[float, ...]:
 
 def _norm_abs(value: Any, scale: float) -> float:
     return abs(_float(value)) / max(abs(float(scale)), 1.0e-9)
+
+
+def _norm_positive(value: Any, scale: float) -> float:
+    return max(0.0, _float(value)) / max(abs(float(scale)), 1.0e-9)
 
 
 def _nonnegative(value: Any) -> float:
@@ -286,6 +435,32 @@ def _body_activity(state: Any) -> float:
 def _command_values(command: Any, name: str) -> Tuple[float, ...]:
     wheels = tuple(getattr(command, "wheels", ()) or ())
     return tuple(_float(getattr(wheel, name, 1.0)) for wheel in wheels)
+
+
+def _action_diagnostics(transition: RewardTransition) -> Dict[str, float]:
+    action = _float_list(transition.action)
+    previous_action = _float_list(transition.previous_action)
+    final_dampers = _command_values(transition.final_command, "damper_scale")
+    previous_final_dampers = _float_list(transition.previous_final_damper_scales)
+    return {
+        "rl_action_rate": _mean_abs_diff(action, previous_action),
+        "rl_final_damper_rate": (
+            _mean_abs_diff(final_dampers, previous_final_dampers)
+            if previous_final_dampers else 0.0),
+    }
+
+
+def _diagnostic_wheel_values(
+    diagnostics: Mapping[str, Any],
+    prefix: str,
+) -> Tuple[float, ...]:
+    labels = ("fl", "fr", "rl", "rr")
+    values = []
+    for label in labels:
+        key = prefix + label
+        if key in diagnostics:
+            values.append(_float(diagnostics.get(key)))
+    return tuple(values)
 
 
 def _mean_abs(values: Sequence[float]) -> float:

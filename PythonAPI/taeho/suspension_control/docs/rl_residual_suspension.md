@@ -109,6 +109,89 @@ python -m suspension_control.rl.evaluate_policy \
   --dry-run --steps 100 --output-dir /tmp/rl_suspension_dry_run
 ```
 
+## Phase 0 Metrics
+
+Route reports should treat the first 3 seconds as controller/sensor warmup.
+Use `warmup_excluded_*` values as the main metrics; raw `comfort_*` and
+`stability_*` values are diagnostic context. The route suite default is:
+
+```text
+--metric-warmup-seconds 3.0
+```
+
+The dry-run training scaffold also masks rewards before
+`initial_transition_skip_seconds: 3.0`, so early transient sensor values do not
+drive the reward signal.
+
+## Zero-Residual Equivalence
+
+Before training or evaluating a policy, replay an existing `profile.csv` offline:
+
+```bash
+python suspension_zero_residual_equivalence.py \
+  --profile /path/to/profile.csv \
+  --baselines skyhook,pid
+```
+
+The acceptance criteria are:
+
+- `max_abs_damper_diff <= 1e-6`
+- `max_abs_spring_diff == 0`
+- `max_rl_mean_abs_action == 0`
+- `max_rl_mean_abs_residual_damper == 0`
+
+This proves `rl_residual_skyhook` with a zero policy is command-equivalent to
+skyhook, and `rl_residual_pid` with a zero policy is command-equivalent to PID
+on the same `VehicleState` sequence.
+
+## Phase 2 Online Dummy Policy
+
+After Phase 1 passes, run the online dummy-policy route suite:
+
+```bash
+cd /home/yth/sim/docker
+bash run_phase2_online_dummy.sh \
+  --routes-subset 00 \
+  --seeds 100 \
+  --debug 0 \
+  --sidecar-tick-mode poll \
+  --poll-seconds 0.05 \
+  --pause-between-runs 30 \
+  --stop-on-failure \
+  --output-dir /home/yth/sim/e2e_models/outputs/rl_suspension_phase2_dummy_seed100_route00
+```
+
+The `rl_zero_residual_*` scenarios load the explicit built-in `dummy_zero`
+policy. They should not rely on missing-policy fallback. The suite writes:
+
+```text
+phase2_online_dummy_acceptance.csv
+```
+
+A passing zero-residual row has:
+
+- route score 100 and no infractions
+- `sidecar_command_verifies > 0`
+- `policy_available_ratio >= 0.99`
+- `rl_fallback_rows == 0`
+- `rl_mean_abs_action == 0`
+- `rl_mean_abs_residual_damper == 0`
+- matching route score/penalty versus its paired PID or skyhook baseline
+
+Phase 2 also records safety-gate diagnostics in `controller_diagnostics.csv`:
+
+- `rl_safety_gate_active`
+- `rl_safety_gate_reason`
+- `rl_safety_gate_roll_limit`
+- `rl_safety_gate_lateral_acc_limit`
+- `rl_safety_gate_yaw_rate_limit`
+- `rl_safety_gate_nonfinite_obs`
+- `rl_safety_gate_action_invalid`
+
+The suite summary and `phase2_online_dummy_acceptance.csv` include
+`safety_gate_active_ratio`, reason counts, and speed/roll/lateral-acc/yaw-rate
+statistics for frames where the safety gate is active.
+
 ## Training
 
 Training is scaffolded and requires optional dependencies:
@@ -176,4 +259,6 @@ skyhook
 rl_residual_skyhook
 rl_residual_pid
 rl_residual_skyhook_no_planning
+rl_zero_residual_pid
+rl_zero_residual_skyhook
 ```

@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import math
 import os
-from typing import Any, Dict, Mapping, Optional
+from typing import Any, Dict, Mapping, Optional, Sequence
 
 
 DEFAULT_FEATURE_SCALES: Dict[str, float] = {
@@ -128,8 +128,48 @@ class FixedScaleNormalizer:
             }
 
 
+def normalizer_metadata(
+    feature_names: Sequence[str],
+    clip: float,
+    action_semantics: str,
+    max_damper_residual_scale: float,
+) -> Dict[str, Any]:
+    """Return deploy-time metadata for fixed-scale observation normalization."""
+
+    names = [str(name) for name in feature_names]
+    scales = {
+        name: _scale_for_feature_name(name)
+        for name in names
+    }
+    return {
+        "normalizer_type": "fixed_scale",
+        "source": "fixed_scale_phase4",
+        "feature_names": names,
+        "feature_scales": scales,
+        "clip": float(clip),
+        "observation_clip": float(clip),
+        "mean": {
+            name: 0.0
+            for name in names
+        },
+        "std": scales,
+        "action_semantics": str(action_semantics),
+        "max_damper_residual_scale": float(max_damper_residual_scale),
+        "spring_frozen": True,
+    }
+
+
 def _finite_number(value: Any) -> bool:
     try:
         return math.isfinite(float(value))
     except (TypeError, ValueError):
         return False
+
+
+def _scale_for_feature_name(name: str) -> float:
+    if name in DEFAULT_FEATURE_SCALES:
+        return DEFAULT_FEATURE_SCALES[name]
+    for token, scale in DEFAULT_FEATURE_SCALES.items():
+        if token and token in name:
+            return scale
+    return 1.0

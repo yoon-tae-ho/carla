@@ -11,6 +11,7 @@ learning_starts: 5000
 total_timesteps: 100000
 seed: 0
 dry_run: true
+initial_transition_skip_seconds: 3.0
 route_scenarios: rl_residual_skyhook
 planning_provider: empty
 domain_randomization: false

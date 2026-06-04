@@ -36,7 +36,12 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 if SCRIPT_DIR not in sys.path:
     sys.path.insert(0, SCRIPT_DIR)
 
-from suspension_control.controllers.base import ControllerContext, PlanningInfo
+from suspension_control.controllers.base import (
+    ControllerContext,
+    PlanningInfo,
+    SuspensionCommand,
+    WheelScale,
+)
 from suspension_control.controllers.identity import IdentityController
 from suspension_control.controllers.pid import FeedbackPIDConfig, FeedbackPIDController
 from suspension_control.controllers.rl_residual import (
@@ -57,6 +62,14 @@ from suspension_control.runtime.planning_provider import (
     make_planning_provider,
     planning_diagnostics,
 )
+from suspension_control.runtime.route_progress import RouteProgressTracker
+from suspension_control.rl.diagnostics import wheel_values_from_mapping
+from suspension_control.rl.reward import RewardTransition, SuspensionReward
+from suspension_control.rl.reward_calibration import (
+    write_phase3b_reward_calibration_report,
+)
+from suspension_control.rl.reward_sanity import write_phase3_reward_sanity_report
+from suspension_control.rl.task_info import TaskInfoBuilder, TaskInfoBuilderConfig
 
 
 SIM_ROOT = os.environ.get("SIM_ROOT", os.path.expanduser("~/sim"))
@@ -123,6 +136,68 @@ SCENARIOS = OrderedDict((
         "controller": "rl_residual_skyhook_no_planning",
         "uses_suspension_api": True,
         "force_empty_planning": True,
+    }),
+    ("rl_zero_residual_pid", {
+        "name": "S7_rl_zero_residual_pid",
+        "label": "S7 zero-residual RL over PID",
+        "controller": "rl_zero_residual_pid",
+        "uses_suspension_api": True,
+        "phase2_baseline_scenario": "S2_pid",
+    }),
+    ("rl_zero_residual_skyhook", {
+        "name": "S8_rl_zero_residual_skyhook",
+        "label": "S8 zero-residual RL over skyhook",
+        "controller": "rl_zero_residual_skyhook",
+        "uses_suspension_api": True,
+        "phase2_baseline_scenario": "S3_skyhook",
+    }),
+    ("rl_const_plus_0p02_skyhook", {
+        "name": "S9_rl_const_plus_0p02_skyhook",
+        "label": "S9 const action +0.02 RL over skyhook",
+        "controller": "rl_const_plus_0p02_skyhook",
+        "uses_suspension_api": True,
+        "phase2c_expected_action": 0.02,
+        "phase2c_role": "constant_positive_canary",
+    }),
+    ("rl_const_minus_0p02_skyhook", {
+        "name": "S10_rl_const_minus_0p02_skyhook",
+        "label": "S10 const action -0.02 RL over skyhook",
+        "controller": "rl_const_minus_0p02_skyhook",
+        "uses_suspension_api": True,
+        "phase2c_expected_action": -0.02,
+        "phase2c_role": "constant_negative_canary",
+    }),
+    ("rl_random_small_skyhook", {
+        "name": "S11_rl_random_small_skyhook",
+        "label": "S11 random action 0.02 RL over skyhook",
+        "controller": "rl_random_small_skyhook",
+        "uses_suspension_api": True,
+        "phase2c_expected_action": "",
+        "phase2c_role": "random_small_canary",
+    }),
+    ("rl_const_action_plus_0p25_skyhook", {
+        "name": "S12_rl_const_action_plus_0p25_skyhook",
+        "label": "S12 const action +0.25 RL over skyhook",
+        "controller": "rl_const_action_plus_0p25_skyhook",
+        "uses_suspension_api": True,
+        "phase2c_expected_action": 0.25,
+        "phase2c_role": "constant_positive_canary",
+    }),
+    ("rl_const_action_minus_0p25_skyhook", {
+        "name": "S13_rl_const_action_minus_0p25_skyhook",
+        "label": "S13 const action -0.25 RL over skyhook",
+        "controller": "rl_const_action_minus_0p25_skyhook",
+        "uses_suspension_api": True,
+        "phase2c_expected_action": -0.25,
+        "phase2c_role": "constant_negative_canary",
+    }),
+    ("rl_random_action_0p10_skyhook", {
+        "name": "S14_rl_random_action_0p10_skyhook",
+        "label": "S14 random action 0.10 RL over skyhook",
+        "controller": "rl_random_action_0p10_skyhook",
+        "uses_suspension_api": True,
+        "phase2c_expected_action": "",
+        "phase2c_role": "random_action_canary",
     }),
 ))
 
@@ -195,6 +270,10 @@ DIAGNOSTIC_FIELDS = (
     "frame",
     "elapsed_seconds",
     "step",
+    "speed",
+    "roll",
+    "local_ay",
+    "yaw_rate",
     "command_applied",
     "apply_count",
     "verify_count",
@@ -266,17 +345,44 @@ DIAGNOSTIC_FIELDS = (
     "rl_baseline",
     "rl_policy_available",
     "rl_policy_status",
+    "rl_policy_builtin_id",
+    "rl_policy_alias_deprecated",
     "rl_observation_valid",
     "rl_safety_gain",
+    "rl_safety_gate_active",
+    "rl_safety_gate_reason",
+    "rl_safety_gate_speed_limit",
+    "rl_safety_gate_roll_limit",
+    "rl_safety_gate_pitch_limit",
+    "rl_safety_gate_lateral_acc_limit",
+    "rl_safety_gate_yaw_rate_limit",
+    "rl_safety_gate_nonfinite_obs",
+    "rl_safety_gate_action_invalid",
     "rl_fallback_reason",
     "rl_action_fl",
     "rl_action_fr",
     "rl_action_rl",
     "rl_action_rr",
+    "rl_raw_residual_damper_fl",
+    "rl_raw_residual_damper_fr",
+    "rl_raw_residual_damper_rl",
+    "rl_raw_residual_damper_rr",
+    "rl_safety_scaled_residual_damper_fl",
+    "rl_safety_scaled_residual_damper_fr",
+    "rl_safety_scaled_residual_damper_rl",
+    "rl_safety_scaled_residual_damper_rr",
+    "rl_rate_limited_residual_damper_fl",
+    "rl_rate_limited_residual_damper_fr",
+    "rl_rate_limited_residual_damper_rl",
+    "rl_rate_limited_residual_damper_rr",
     "rl_residual_damper_fl",
     "rl_residual_damper_fr",
     "rl_residual_damper_rl",
     "rl_residual_damper_rr",
+    "rl_final_residual_damper_fl",
+    "rl_final_residual_damper_fr",
+    "rl_final_residual_damper_rl",
+    "rl_final_residual_damper_rr",
     "rl_baseline_damper_fl",
     "rl_baseline_damper_fr",
     "rl_baseline_damper_rl",
@@ -288,8 +394,117 @@ DIAGNOSTIC_FIELDS = (
     "rl_planning_available",
     "rl_observation_size",
     "rl_observation_clip_count",
+    "rl_mean_action",
     "rl_mean_abs_action",
+    "rl_mean_residual_damper",
     "rl_mean_abs_residual_damper",
+    "reward_mode",
+    "reward_baseline_command_source",
+    "reward_total",
+    "reward_alive_bonus",
+    "reward_comfort",
+    "reward_stability",
+    "reward_task",
+    "reward_action",
+    "reward_safety",
+    "reward_cost_comfort",
+    "reward_cost_stability",
+    "reward_cost_task",
+    "reward_cost_action",
+    "reward_cost_safety",
+    "reward_term_abs_az",
+    "reward_term_abs_lat_acc",
+    "reward_term_abs_long_acc",
+    "reward_term_jerk_z",
+    "reward_term_jerk_y",
+    "reward_term_jerk_x",
+    "reward_term_roll_rate",
+    "reward_term_pitch_rate",
+    "reward_term_roll",
+    "reward_term_pitch",
+    "reward_term_yaw_rate",
+    "reward_term_stability_lat_acc",
+    "reward_term_body_activity",
+    "reward_term_corner_vz",
+    "reward_term_route_deviation",
+    "reward_term_low_speed_not_planned",
+    "reward_term_progress_stall",
+    "reward_term_negative_progress",
+    "reward_term_insufficient_progress",
+    "reward_term_target_speed_error",
+    "reward_term_abs_speed_error",
+    "reward_term_lane_invasion",
+    "reward_term_collision",
+    "reward_term_red_light",
+    "reward_term_blocked_vehicle",
+    "reward_term_route_timeout",
+    "reward_term_action_mag",
+    "reward_term_action_rate",
+    "reward_term_damper_rate",
+    "reward_term_baseline_dev",
+    "reward_term_residual_damper_mag",
+    "reward_term_residual_damper_rate",
+    "reward_term_final_damper_rate",
+    "reward_term_spring_dev",
+    "reward_term_safety_gate_active",
+    "reward_term_safety_gain_loss",
+    "reward_term_observation_clip_count",
+    "reward_term_terminal_collision",
+    "reward_term_terminal_route_failure",
+    "reward_term_nonfinite",
+    "reward_route_deviation_used",
+    "reward_route_deviation_enabled",
+    "reward_route_deviation_valid",
+    "reward_task_capped_without_infraction",
+    "reward_task_abs_max_without_infraction",
+    "rl_action_rate",
+    "rl_final_damper_rate",
+    "route_progress_available",
+    "route_progress_raw_m",
+    "route_progress_m",
+    "route_progress_fraction",
+    "route_progress_monotonic_m",
+    "route_progress_monotonic_fraction",
+    "route_progress_total_length_m",
+    "route_total_length_m",
+    "route_progress_delta_m",
+    "route_delta_progress_m",
+    "route_progress_rate_mps",
+    "route_progress_raw_negative_delta_m",
+    "route_progress_negative_raw",
+    "route_progress_raw_deviation_m",
+    "route_progress_deviation_valid",
+    "route_deviation_m",
+    "route_deviation_valid",
+    "route_deviation",
+    "route_distance_to_end_m",
+    "route_progress_nearest_segment_index",
+    "route_progress_projection_segment",
+    "route_progress_global_research_used",
+    "route_progress_search_window_start",
+    "route_progress_search_window_end",
+    "route_progress_tracker_status",
+    "route_progress_error",
+    "route_progress_stall",
+    "progress_stall_count",
+    "delta_progress",
+    "target_speed",
+    "target_speed_source",
+    "target_speed_error",
+    "speed_error",
+    "abs_speed_error",
+    "planned_stop",
+    "low_speed_not_planned",
+    "low_speed_not_planned_severity",
+    "progress_stall",
+    "negative_progress",
+    "route_completion_proxy",
+    "collision_count",
+    "lane_invasion_count",
+    "red_light_count",
+    "blocked_vehicle",
+    "route_timeout",
+    "route_failed",
 )
 
 ROUTE_METRIC_PREFIXES = (
@@ -364,6 +579,43 @@ def build_rl_residual_config(
     return ResidualRLConfig.from_mapping(values)
 
 
+def build_zero_residual_config(
+    args: argparse.Namespace,
+    baseline: str,
+) -> ResidualRLConfig:
+    values: Dict[str, Any] = {}
+    if args.rl_residual_config and os.path.isfile(args.rl_residual_config):
+        values.update(read_flat_yaml(args.rl_residual_config))
+    if args.rl_normalizer:
+        values["normalizer_path"] = expand_path(args.rl_normalizer)
+    values.update({
+        "baseline": baseline,
+        "policy_path": "dummy_zero",
+        "allow_untrained_policy": False,
+        "deterministic_policy": True,
+    })
+    return ResidualRLConfig.from_mapping(values)
+
+
+def build_builtin_policy_residual_config(
+    args: argparse.Namespace,
+    baseline: str,
+    policy_path: str,
+) -> ResidualRLConfig:
+    values: Dict[str, Any] = {}
+    if args.rl_residual_config and os.path.isfile(args.rl_residual_config):
+        values.update(read_flat_yaml(args.rl_residual_config))
+    if args.rl_normalizer:
+        values["normalizer_path"] = expand_path(args.rl_normalizer)
+    values.update({
+        "baseline": baseline,
+        "policy_path": policy_path,
+        "allow_untrained_policy": False,
+        "deterministic_policy": True,
+    })
+    return ResidualRLConfig.from_mapping(values)
+
+
 def make_controller(controller_name: str, args: argparse.Namespace):
     if controller_name == "stock":
         return None
@@ -379,6 +631,40 @@ def make_controller(controller_name: str, args: argparse.Namespace):
         return ResidualRLController(build_rl_residual_config(args, "pid"))
     if controller_name == "rl_residual_skyhook_no_planning":
         return ResidualRLController(build_rl_residual_config(args, "skyhook"))
+    if controller_name == "rl_zero_residual_pid":
+        return ResidualRLController(build_zero_residual_config(args, "pid"))
+    if controller_name == "rl_zero_residual_skyhook":
+        return ResidualRLController(build_zero_residual_config(args, "skyhook"))
+    if controller_name == "rl_const_plus_0p02_skyhook":
+        return ResidualRLController(build_builtin_policy_residual_config(
+            args,
+            "skyhook",
+            "const_action_plus_0p02"))
+    if controller_name == "rl_const_minus_0p02_skyhook":
+        return ResidualRLController(build_builtin_policy_residual_config(
+            args,
+            "skyhook",
+            "const_action_minus_0p02"))
+    if controller_name == "rl_random_small_skyhook":
+        return ResidualRLController(build_builtin_policy_residual_config(
+            args,
+            "skyhook",
+            "random_action_0p02"))
+    if controller_name == "rl_const_action_plus_0p25_skyhook":
+        return ResidualRLController(build_builtin_policy_residual_config(
+            args,
+            "skyhook",
+            "const_action_plus_0p25"))
+    if controller_name == "rl_const_action_minus_0p25_skyhook":
+        return ResidualRLController(build_builtin_policy_residual_config(
+            args,
+            "skyhook",
+            "const_action_minus_0p25"))
+    if controller_name == "rl_random_action_0p10_skyhook":
+        return ResidualRLController(build_builtin_policy_residual_config(
+            args,
+            "skyhook",
+            "random_action_0p10"))
     raise ValueError("unknown controller %s" % controller_name)
 
 
@@ -412,23 +698,22 @@ def parse_seeds(value: str) -> List[int]:
 
 
 def selected_scenarios(value: str) -> List[Dict[str, Any]]:
+    scenario_name_to_key = {
+        scenario["name"]: key
+        for key, scenario in SCENARIOS.items()
+    }
+    scenario_code_to_key = {
+        scenario["name"].split("_", 1)[0]: key
+        for key, scenario in SCENARIOS.items()
+    }
     selected = []
     for name in parse_csv_list(value):
         key = name
-        if key.startswith("S0"):
-            key = "stock"
-        elif key.startswith("S1"):
-            key = "identity"
-        elif key.startswith("S2"):
-            key = "pid"
-        elif key.startswith("S3"):
-            key = "skyhook"
-        elif key.startswith("S4"):
-            key = "rl_residual_skyhook"
-        elif key.startswith("S5"):
-            key = "rl_residual_pid"
-        elif key.startswith("S6"):
-            key = "rl_residual_skyhook_no_planning"
+        if key not in SCENARIOS:
+            scenario_code = name if "_" not in name else ""
+            key = scenario_name_to_key.get(
+                name,
+                scenario_code_to_key.get(scenario_code, key))
         if key not in SCENARIOS:
             raise ValueError(
                 "unknown scenario %s; choose from %s" %
@@ -496,6 +781,64 @@ def get_actor_control(actor: Any):
         return None
 
 
+def route_progress_id_from_subset(value: Any) -> str:
+    parts = parse_csv_list(str(value or ""))
+    if not parts:
+        return ""
+    first = parts[0]
+    if "-" in first:
+        first = first.split("-", 1)[0]
+    return first.strip()
+
+
+def reward_action_from_diagnostics(
+    diagnostics: Mapping[str, Any],
+    wheel_count: int,
+) -> Tuple[float, ...]:
+    values = wheel_values_from_mapping(diagnostics, "rl_action_", wheel_count)
+    if values:
+        return values
+    return tuple(0.0 for _ in range(wheel_count))
+
+
+def damper_scales_from_command(command: Any) -> Tuple[float, ...]:
+    return tuple(
+        float(getattr(wheel, "damper_scale", 1.0))
+        for wheel in tuple(getattr(command, "wheels", ()) or ()))
+
+
+def baseline_command_for_reward(
+    final_command: SuspensionCommand,
+    diagnostics: Mapping[str, Any],
+) -> Tuple[SuspensionCommand, str]:
+    wheels = tuple(final_command.wheels)
+    baseline_dampers = wheel_values_from_mapping(
+        diagnostics,
+        "rl_baseline_damper_",
+        len(wheels))
+    if baseline_dampers:
+        return SuspensionCommand(tuple(
+            WheelScale(
+                spring_scale=float(getattr(wheel, "spring_scale", 1.0)),
+                damper_scale=float(damper))
+            for wheel, damper in zip(wheels, baseline_dampers)
+        )), "rl_baseline_diagnostics"
+    return final_command, (
+        "output_command_fallback"
+        if diagnostics.get("rl_policy_available", "") != ""
+        else "output_command")
+
+
+def task_info_from_planning(planning: Any) -> Dict[str, Any]:
+    if planning is None:
+        return {}
+    if hasattr(planning, "as_dict"):
+        return dict(planning.as_dict())
+    if isinstance(planning, Mapping):
+        return dict(planning)
+    return {}
+
+
 class SuspensionExperimentSidecar(threading.Thread):
     """CARLA client sidecar used by one scenario run."""
 
@@ -527,8 +870,39 @@ class SuspensionExperimentSidecar(threading.Thread):
         self.apply_count_by_actor_id: Dict[int, int] = {}
         self.verify_count_by_actor_id: Dict[int, int] = {}
         self.last_frame_by_actor_id: Dict[int, int] = {}
+        self.previous_action_by_actor_id: Dict[int, Tuple[float, ...]] = {}
+        self.previous_final_damper_by_actor_id: Dict[int, Tuple[float, ...]] = {}
         self.next_episode_index = 0
         self.planning_provider = make_planning_provider(args)
+        self.route_progress_tracker = RouteProgressTracker(
+            expand_path(args.routes),
+            route_id=route_progress_id_from_subset(args.routes_subset))
+        self.task_info_builder = TaskInfoBuilder(TaskInfoBuilderConfig(
+            nominal_target_speed=getattr(
+                args,
+                "reward_nominal_target_speed",
+                TaskInfoBuilderConfig.nominal_target_speed),
+            reward_low_speed_threshold_mps=getattr(
+                args,
+                "reward_low_speed_threshold_mps",
+                TaskInfoBuilderConfig.reward_low_speed_threshold_mps),
+            reward_min_progress_rate_mps=getattr(
+                args,
+                "reward_min_progress_rate_mps",
+                TaskInfoBuilderConfig.reward_min_progress_rate_mps),
+            reward_planned_stop_brake_threshold=getattr(
+                args,
+                "reward_planned_stop_brake_threshold",
+                TaskInfoBuilderConfig.reward_planned_stop_brake_threshold),
+            progress_stall_steps=getattr(
+                args,
+                "reward_progress_stall_steps",
+                TaskInfoBuilderConfig.progress_stall_steps),
+            progress_stall_epsilon_m=getattr(
+                args,
+                "reward_progress_stall_epsilon_m",
+                TaskInfoBuilderConfig.progress_stall_epsilon_m)))
+        self.reward = SuspensionReward()
 
     def stop(self) -> None:
         self.stop_event.set()
@@ -625,6 +999,9 @@ class SuspensionExperimentSidecar(threading.Thread):
             self.apply_count_by_actor_id.pop(actor_id, None)
             self.verify_count_by_actor_id.pop(actor_id, None)
             self.last_frame_by_actor_id.pop(actor_id, None)
+            self.previous_action_by_actor_id.pop(actor_id, None)
+            self.previous_final_damper_by_actor_id.pop(actor_id, None)
+            self.task_info_builder.reset(actor_id)
             self.log_event(
                 event_writer,
                 "actor_removed",
@@ -724,6 +1101,44 @@ class SuspensionExperimentSidecar(threading.Thread):
             dt=dt)
         output = controller.compute(context)
         output.command.validate(expected_wheels=len(native.wheels))
+        output_diagnostics = dict(output.diagnostics or {})
+        route_progress = self.route_progress_tracker.update(
+            state,
+            actor_id=actor_id,
+            dt=dt)
+        task_info = self.task_info_builder.build(
+            state=state,
+            previous_state=previous_state,
+            route_progress=route_progress,
+            planning=planning,
+            live_task_info=task_info_from_planning(planning),
+            actor_id=actor_id)
+        action = reward_action_from_diagnostics(
+            output_diagnostics,
+            len(output.command.wheels))
+        previous_action = self.previous_action_by_actor_id.get(
+            actor_id,
+            tuple(0.0 for _ in range(len(action))))
+        previous_final_dampers = self.previous_final_damper_by_actor_id.get(
+            actor_id,
+            ())
+        baseline_command, baseline_source = baseline_command_for_reward(
+            output.command,
+            output_diagnostics)
+        _, reward_diagnostics = self.reward.compute(RewardTransition(
+            state=state,
+            previous_state=previous_state,
+            action=action,
+            previous_action=previous_action,
+            previous_final_damper_scales=previous_final_dampers,
+            final_command=output.command,
+            baseline_command=baseline_command,
+            task_info=task_info,
+            diagnostics=output_diagnostics,
+            terminal=False,
+            dt=dt))
+        reward_diagnostics["reward_mode"] = "instantaneous_route_diagnostic"
+        reward_diagnostics["reward_baseline_command_source"] = baseline_source
 
         next_apply_count = self.apply_count_by_actor_id[actor_id] + 1
         verify = self.should_verify(actor_id, next_apply_count)
@@ -763,6 +1178,10 @@ class SuspensionExperimentSidecar(threading.Thread):
             "frame": state.frame,
             "elapsed_seconds": state.elapsed_seconds,
             "step": state.step,
+            "speed": state.speed,
+            "roll": state.roll,
+            "local_ay": state.local_ay,
+            "yaw_rate": state.yaw_rate,
             "command_applied": 1,
             "apply_count": self.apply_count_by_actor_id[actor_id],
             "verify_count": self.verify_count_by_actor_id[actor_id],
@@ -786,11 +1205,17 @@ class SuspensionExperimentSidecar(threading.Thread):
                 "max_damper_scale", ""),
         })
         row.update(planning_diagnostics(planning, current_frame=state.frame))
-        row.update(output.diagnostics)
+        row.update(output_diagnostics)
+        row.update(route_progress)
+        row.update(task_info)
+        row.update(reward_diagnostics)
         diagnostic_writer.writerow({
             field: format_value(row.get(field, ""))
             for field in DIAGNOSTIC_FIELDS
         })
+        self.previous_action_by_actor_id[actor_id] = tuple(action)
+        self.previous_final_damper_by_actor_id[actor_id] = damper_scales_from_command(
+            output.command)
 
     def process_actor(
         self,
@@ -1101,14 +1526,118 @@ def count_csv_rows(path: str) -> int:
 
 def summarize_diagnostics_csv(path: str) -> Dict[str, Any]:
     summary: Dict[str, Any] = {
+        "diagnostic_rows": 0,
+        "rl_diagnostic_rows": 0,
         "rl_policy_available_rows": 0,
+        "rl_policy_available_ratio": "",
+        "rl_fallback_rows": 0,
         "rl_fallback_reasons": "",
+        "rl_zero_action_rows": 0,
+        "rl_nonzero_action_rows": 0,
+        "rl_zero_residual_rows": 0,
+        "rl_nonzero_residual_rows": 0,
         "rl_mean_safety_gain": "",
+        "rl_mean_action": "",
         "rl_mean_abs_action": "",
+        "rl_mean_residual_damper": "",
         "rl_mean_abs_residual_damper": "",
         "rl_observation_clip_count_max": "",
+        "low_speed_mask_rows": 0,
+        "low_speed_mask_ratio": "",
+        "hard_safety_gate_rows": 0,
+        "hard_safety_gate_ratio": "",
+        "soft_safety_gain_rows": 0,
+        "soft_safety_gain_ratio": "",
+        "effective_control_ratio": "",
+        "safety_gate_rows": 0,
+        "safety_gate_active_rows": 0,
+        "safety_gate_active_ratio": "",
+        "safety_gate_reason_counts": "",
+        "safety_gate_active_speed_min": "",
+        "safety_gate_active_speed_mean": "",
+        "safety_gate_active_speed_max": "",
+        "safety_gate_active_roll_min": "",
+        "safety_gate_active_roll_mean": "",
+        "safety_gate_active_roll_max": "",
+        "safety_gate_active_abs_roll_mean": "",
+        "safety_gate_active_abs_roll_max": "",
+        "safety_gate_active_lateral_acc_min": "",
+        "safety_gate_active_lateral_acc_mean": "",
+        "safety_gate_active_lateral_acc_max": "",
+        "safety_gate_active_abs_lateral_acc_mean": "",
+        "safety_gate_active_abs_lateral_acc_max": "",
+        "safety_gate_active_yaw_rate_min": "",
+        "safety_gate_active_yaw_rate_mean": "",
+        "safety_gate_active_yaw_rate_max": "",
+        "safety_gate_active_abs_yaw_rate_mean": "",
+        "safety_gate_active_abs_yaw_rate_max": "",
         "planning_available_rows": 0,
         "planning_sources": "",
+        "policy_available_ratio": "",
+        "fallback_ratio": "",
+        "observation_clip_ratio": "",
+        "mean_abs_action": "",
+        "mean_abs_residual_damper": "",
+        "mean_reward_total": "",
+        "mean_reward_comfort": "",
+        "mean_reward_stability": "",
+        "mean_reward_task": "",
+        "mean_reward_action": "",
+        "mean_reward_safety": "",
+        "reward_rows": 0,
+        "reward_row_ratio": "",
+        "mean_reward_cost_comfort": "",
+        "mean_reward_cost_stability": "",
+        "mean_reward_cost_task": "",
+        "mean_reward_cost_action": "",
+        "mean_reward_cost_safety": "",
+        "mean_reward_term_action_mag": "",
+        "mean_reward_term_action_rate": "",
+        "mean_reward_term_damper_rate": "",
+        "mean_reward_term_baseline_dev": "",
+        "mean_reward_term_low_speed_not_planned": "",
+        "mean_reward_term_progress_stall": "",
+        "mean_reward_term_route_deviation": "",
+        "mean_reward_term_abs_speed_error": "",
+        "mean_reward_route_deviation_used_ratio": "",
+        "reward_route_deviation_used_rows": 0,
+        "reward_route_deviation_enabled_rows": 0,
+        "reward_route_deviation_valid_rows": 0,
+        "reward_task_capped_without_infraction_rows": 0,
+        "reward_task_capped_without_infraction_ratio": "",
+        "route_progress_available_rows": 0,
+        "route_progress_available_ratio": "",
+        "route_progress_fraction_max": "",
+        "route_progress_monotonic_fraction_max": "",
+        "route_completion_proxy": "",
+        "route_progress_delta_negative_raw_rows": 0,
+        "route_progress_delta_negative_raw_ratio": "",
+        "route_progress_raw_negative_rows": 0,
+        "route_progress_raw_negative_ratio": "",
+        "route_progress_monotonic_negative_rows": 0,
+        "route_progress_monotonic_negative_ratio": "",
+        "route_deviation_m_mean": "",
+        "route_deviation_m_max": "",
+        "route_deviation_valid_rows": 0,
+        "route_deviation_valid_ratio": "",
+        "planned_stop_rows": 0,
+        "planned_stop_ratio": "",
+        "low_speed_not_planned_rows": 0,
+        "low_speed_not_planned_ratio": "",
+        "progress_stall_rows": 0,
+        "progress_stall_ratio": "",
+        "route_progress_stall_rows": 0,
+        "route_progress_stall_ratio": "",
+        "progress_stall_count_max": "",
+        "negative_progress_rows": 0,
+        "negative_progress_ratio": "",
+        "mean_route_progress_rate_mps": "",
+        "mean_abs_speed_error": "",
+        "collision_count": 0,
+        "lane_invasion_count": 0,
+        "red_light_count": 0,
+        "blocked_vehicle_count": 0,
+        "route_timeout_count": 0,
     }
     if not os.path.isfile(path):
         return summary
@@ -1116,17 +1645,61 @@ def summarize_diagnostics_csv(path: str) -> Dict[str, Any]:
     fallback_reasons = set()
     planning_sources = set()
     safety_gains = []
+    signed_actions = []
     abs_actions = []
+    signed_residuals = []
     abs_residuals = []
     clip_counts = []
+    gate_reason_counts: Dict[str, int] = {}
+    gate_active_speeds: List[float] = []
+    gate_active_rolls: List[float] = []
+    gate_active_lateral_accs: List[float] = []
+    gate_active_yaw_rates: List[float] = []
+    reward_total: List[float] = []
+    reward_comfort: List[float] = []
+    reward_stability: List[float] = []
+    reward_task: List[float] = []
+    reward_action: List[float] = []
+    reward_safety: List[float] = []
+    reward_cost_comfort: List[float] = []
+    reward_cost_stability: List[float] = []
+    reward_cost_task: List[float] = []
+    reward_cost_action: List[float] = []
+    reward_cost_safety: List[float] = []
+    reward_term_action_mag: List[float] = []
+    reward_term_action_rate: List[float] = []
+    reward_term_damper_rate: List[float] = []
+    reward_term_baseline_dev: List[float] = []
+    reward_term_low_speed_not_planned: List[float] = []
+    reward_term_progress_stall: List[float] = []
+    reward_term_route_deviation: List[float] = []
+    reward_term_abs_speed_error: List[float] = []
+    reward_route_deviation_used: List[float] = []
+    route_progress_values: List[float] = []
+    route_progress_monotonic_values: List[float] = []
+    route_completion_values: List[float] = []
+    route_deviation_values: List[float] = []
+    progress_stall_counts: List[float] = []
+    route_progress_rates: List[float] = []
+    abs_speed_errors: List[float] = []
+    collision_counts: List[float] = []
+    lane_counts: List[float] = []
+    red_light_counts: List[float] = []
+    blocked_counts: List[float] = []
+    timeout_counts: List[float] = []
 
     with open(path) as csv_file:
         for row in csv.DictReader(csv_file):
+            summary["diagnostic_rows"] += 1
+            has_rl = row.get("rl_policy_available", "") != ""
+            if has_rl:
+                summary["rl_diagnostic_rows"] += 1
             policy_available = safe_float(row.get("rl_policy_available"))
             if policy_available is not None and policy_available > 0.0:
                 summary["rl_policy_available_rows"] += 1
             reason = row.get("rl_fallback_reason", "")
             if reason:
+                summary["rl_fallback_rows"] += 1
                 fallback_reasons.add(reason)
             planning_available = safe_float(row.get("planning_available"))
             if planning_available is not None and planning_available > 0.0:
@@ -1134,18 +1707,296 @@ def summarize_diagnostics_csv(path: str) -> Dict[str, Any]:
             planning_source = row.get("planning_source", "")
             if planning_source:
                 planning_sources.add(planning_source)
-            _append_float(safety_gains, row.get("rl_safety_gain"))
-            _append_float(abs_actions, row.get("rl_mean_abs_action"))
-            _append_float(abs_residuals, row.get("rl_mean_abs_residual_damper"))
+            safety_gain = safe_float(row.get("rl_safety_gain"))
+            if safety_gain is not None:
+                safety_gains.append(safety_gain)
+            _append_float(signed_actions, row.get("rl_mean_action"))
+            action = safe_float(row.get("rl_mean_abs_action"))
+            if action is not None:
+                abs_actions.append(action)
+                if abs(action) <= 1.0e-12:
+                    summary["rl_zero_action_rows"] += 1
+                else:
+                    summary["rl_nonzero_action_rows"] += 1
+            _append_float(signed_residuals, row.get("rl_mean_residual_damper"))
+            residual = safe_float(row.get("rl_mean_abs_residual_damper"))
+            if residual is not None:
+                abs_residuals.append(residual)
+                if abs(residual) <= 1.0e-12:
+                    summary["rl_zero_residual_rows"] += 1
+                else:
+                    summary["rl_nonzero_residual_rows"] += 1
             _append_float(clip_counts, row.get("rl_observation_clip_count"))
+            _append_float(reward_total, row.get("reward_total"))
+            _append_float(reward_comfort, row.get("reward_comfort"))
+            _append_float(reward_stability, row.get("reward_stability"))
+            _append_float(reward_task, row.get("reward_task"))
+            _append_float(reward_action, row.get("reward_action"))
+            _append_float(reward_safety, row.get("reward_safety"))
+            _append_float(reward_cost_comfort, row.get("reward_cost_comfort"))
+            _append_float(reward_cost_stability, row.get("reward_cost_stability"))
+            _append_float(reward_cost_task, row.get("reward_cost_task"))
+            _append_float(reward_cost_action, row.get("reward_cost_action"))
+            _append_float(reward_cost_safety, row.get("reward_cost_safety"))
+            _append_float(reward_term_action_mag, row.get("reward_term_action_mag"))
+            _append_float(reward_term_action_rate, row.get("reward_term_action_rate"))
+            _append_float(reward_term_damper_rate, row.get("reward_term_damper_rate"))
+            _append_float(reward_term_baseline_dev, row.get("reward_term_baseline_dev"))
+            _append_float(
+                reward_term_low_speed_not_planned,
+                row.get("reward_term_low_speed_not_planned"))
+            _append_float(
+                reward_term_progress_stall,
+                row.get("reward_term_progress_stall"))
+            _append_float(
+                reward_term_route_deviation,
+                row.get("reward_term_route_deviation"))
+            _append_float(
+                reward_term_abs_speed_error,
+                row.get("reward_term_abs_speed_error"))
+            if safe_float(row.get("reward_total")) is not None:
+                summary["reward_rows"] += 1
+            route_deviation_used = safe_float(row.get("reward_route_deviation_used"))
+            if route_deviation_used is not None:
+                reward_route_deviation_used.append(route_deviation_used)
+                if route_deviation_used > 0.0:
+                    summary["reward_route_deviation_used_rows"] += 1
+            if _positive_number(row.get("reward_route_deviation_enabled")):
+                summary["reward_route_deviation_enabled_rows"] += 1
+            if _positive_number(row.get("reward_route_deviation_valid")):
+                summary["reward_route_deviation_valid_rows"] += 1
+            if _positive_number(row.get("reward_task_capped_without_infraction")):
+                summary["reward_task_capped_without_infraction_rows"] += 1
+            route_progress_available = safe_float(row.get("route_progress_available"))
+            if route_progress_available is not None and route_progress_available > 0.0:
+                summary["route_progress_available_rows"] += 1
+            _append_float(route_progress_values, row.get("route_progress_fraction"))
+            _append_float(
+                route_progress_monotonic_values,
+                row.get("route_progress_monotonic_fraction"))
+            _append_float(route_completion_values, row.get("route_completion_proxy"))
+            route_deviation = row.get(
+                "route_deviation_m",
+                row.get("route_progress_raw_deviation_m", row.get("route_deviation")))
+            _append_float(route_deviation_values, route_deviation)
+            if (
+                    _positive_number(row.get("route_progress_deviation_valid")) or
+                    _positive_number(row.get("route_deviation_valid"))):
+                summary["route_deviation_valid_rows"] += 1
+            _append_float(route_progress_rates, row.get("route_progress_rate_mps"))
+            _append_float(abs_speed_errors, row.get("abs_speed_error"))
+            if _raw_negative_progress(row):
+                summary["route_progress_delta_negative_raw_rows"] += 1
+                summary["route_progress_raw_negative_rows"] += 1
+            if _negative_number(row.get("route_progress_delta_m")):
+                summary["route_progress_monotonic_negative_rows"] += 1
+            if _positive_number(row.get("planned_stop")):
+                summary["planned_stop_rows"] += 1
+            if _positive_number(row.get("low_speed_not_planned")):
+                summary["low_speed_not_planned_rows"] += 1
+            if _positive_number(row.get("route_progress_stall")):
+                summary["route_progress_stall_rows"] += 1
+            if _positive_number(row.get("progress_stall")):
+                summary["progress_stall_rows"] += 1
+            _append_float(progress_stall_counts, row.get("progress_stall_count"))
+            if _positive_number(row.get("negative_progress")):
+                summary["negative_progress_rows"] += 1
+            _append_float(collision_counts, row.get("collision_count"))
+            _append_float(lane_counts, row.get("lane_invasion_count"))
+            _append_float(red_light_counts, row.get("red_light_count"))
+            _append_float(blocked_counts, row.get("blocked_vehicle"))
+            _append_float(blocked_counts, row.get("vehicle_blocked"))
+            _append_float(timeout_counts, row.get("route_timeout"))
+            gate_active = safe_float(row.get("rl_safety_gate_active"))
+            if gate_active is not None:
+                summary["safety_gate_rows"] += 1
+                if gate_active > 0.0:
+                    summary["safety_gate_active_rows"] += 1
+                    _append_float(gate_active_speeds, row.get("speed"))
+                    _append_float(gate_active_rolls, row.get("roll"))
+                    _append_float(gate_active_lateral_accs, row.get("local_ay"))
+                    _append_float(gate_active_yaw_rates, row.get("yaw_rate"))
+            reasons = row.get("rl_safety_gate_reason", "")
+            for reason in [item for item in reasons.split(";") if item]:
+                gate_reason_counts[reason] = gate_reason_counts.get(reason, 0) + 1
+            reason_set = set(item for item in reasons.split(";") if item)
+            low_speed_mask = (
+                _positive_number(row.get("rl_safety_gate_speed_limit")) or
+                "speed_below_min" in reason_set)
+            hard_condition = (
+                _positive_number(row.get("rl_safety_gate_nonfinite_obs")) or
+                _positive_number(row.get("rl_safety_gate_action_invalid")) or
+                "nonfinite_obs" in reason_set or
+                "action_invalid" in reason_set)
+            if low_speed_mask:
+                summary["low_speed_mask_rows"] += 1
+            if (
+                    not low_speed_mask and
+                    (hard_condition or (
+                        safety_gain is not None and
+                        safety_gain <= 1.0e-12 and
+                        gate_active is not None and
+                        gate_active > 0.0))):
+                summary["hard_safety_gate_rows"] += 1
+            if (
+                    not low_speed_mask and
+                    safety_gain is not None and
+                    safety_gain > 1.0e-12 and
+                    safety_gain < 1.0 - 1.0e-12):
+                summary["soft_safety_gain_rows"] += 1
 
+    rl_rows = summary["rl_diagnostic_rows"]
+    summary["rl_policy_available_ratio"] = (
+        float(summary["rl_policy_available_rows"]) / float(rl_rows)
+        if rl_rows else "")
+    summary["policy_available_ratio"] = summary["rl_policy_available_ratio"]
+    summary["fallback_ratio"] = _ratio_or_empty(
+        summary["rl_fallback_rows"],
+        rl_rows)
+    summary["low_speed_mask_ratio"] = _ratio_or_empty(
+        summary["low_speed_mask_rows"],
+        rl_rows)
+    summary["hard_safety_gate_ratio"] = _ratio_or_empty(
+        summary["hard_safety_gate_rows"],
+        rl_rows)
+    summary["soft_safety_gain_ratio"] = _ratio_or_empty(
+        summary["soft_safety_gain_rows"],
+        rl_rows)
+    summary["effective_control_ratio"] = _ratio_or_empty(
+        summary["rl_nonzero_residual_rows"],
+        rl_rows)
+    summary["observation_clip_ratio"] = _ratio_or_empty(
+        sum(1 for value in clip_counts if value > 0.0),
+        rl_rows)
+    gate_rows = summary["safety_gate_rows"]
+    summary["safety_gate_active_ratio"] = (
+        float(summary["safety_gate_active_rows"]) / float(gate_rows)
+        if gate_rows else "")
+    summary["safety_gate_reason_counts"] = ";".join(
+        "%s=%d" % (reason, gate_reason_counts[reason])
+        for reason in sorted(gate_reason_counts))
     summary["rl_fallback_reasons"] = ";".join(sorted(fallback_reasons))
     summary["planning_sources"] = ";".join(sorted(planning_sources))
     summary["rl_mean_safety_gain"] = _mean_or_empty(safety_gains)
+    summary["rl_mean_action"] = _mean_or_empty(signed_actions)
     summary["rl_mean_abs_action"] = _mean_or_empty(abs_actions)
+    summary["rl_mean_residual_damper"] = _mean_or_empty(signed_residuals)
     summary["rl_mean_abs_residual_damper"] = _mean_or_empty(abs_residuals)
+    summary["mean_abs_action"] = summary["rl_mean_abs_action"]
+    summary["mean_abs_residual_damper"] = summary["rl_mean_abs_residual_damper"]
+    summary["mean_reward_total"] = _mean_or_empty(reward_total)
+    summary["mean_reward_comfort"] = _mean_or_empty(reward_comfort)
+    summary["mean_reward_stability"] = _mean_or_empty(reward_stability)
+    summary["mean_reward_task"] = _mean_or_empty(reward_task)
+    summary["mean_reward_action"] = _mean_or_empty(reward_action)
+    summary["mean_reward_safety"] = _mean_or_empty(reward_safety)
+    diagnostic_rows = summary["diagnostic_rows"]
+    summary["reward_row_ratio"] = _ratio_or_empty(
+        summary["reward_rows"],
+        diagnostic_rows)
+    summary["mean_reward_cost_comfort"] = _mean_or_empty(reward_cost_comfort)
+    summary["mean_reward_cost_stability"] = _mean_or_empty(reward_cost_stability)
+    summary["mean_reward_cost_task"] = _mean_or_empty(reward_cost_task)
+    summary["mean_reward_cost_action"] = _mean_or_empty(reward_cost_action)
+    summary["mean_reward_cost_safety"] = _mean_or_empty(reward_cost_safety)
+    summary["mean_reward_term_action_mag"] = _mean_or_empty(
+        reward_term_action_mag)
+    summary["mean_reward_term_action_rate"] = _mean_or_empty(
+        reward_term_action_rate)
+    summary["mean_reward_term_damper_rate"] = _mean_or_empty(
+        reward_term_damper_rate)
+    summary["mean_reward_term_baseline_dev"] = _mean_or_empty(
+        reward_term_baseline_dev)
+    summary["mean_reward_term_low_speed_not_planned"] = _mean_or_empty(
+        reward_term_low_speed_not_planned)
+    summary["mean_reward_term_progress_stall"] = _mean_or_empty(
+        reward_term_progress_stall)
+    summary["mean_reward_term_route_deviation"] = _mean_or_empty(
+        reward_term_route_deviation)
+    summary["mean_reward_term_abs_speed_error"] = _mean_or_empty(
+        reward_term_abs_speed_error)
+    summary["mean_reward_route_deviation_used_ratio"] = _ratio_or_empty(
+        summary["reward_route_deviation_used_rows"],
+        diagnostic_rows)
+    summary["reward_task_capped_without_infraction_ratio"] = _ratio_or_empty(
+        summary["reward_task_capped_without_infraction_rows"],
+        diagnostic_rows)
+    summary["route_progress_available_ratio"] = _ratio_or_empty(
+        summary["route_progress_available_rows"],
+        diagnostic_rows)
+    if route_progress_values:
+        summary["route_progress_fraction_max"] = max(route_progress_values)
+    if route_progress_monotonic_values:
+        summary["route_progress_monotonic_fraction_max"] = max(
+            route_progress_monotonic_values)
+    if route_completion_values:
+        summary["route_completion_proxy"] = max(route_completion_values)
+    elif route_progress_values:
+        summary["route_completion_proxy"] = (
+            1 if max(route_progress_values) >= 0.99 else 0)
+    if route_deviation_values:
+        summary["route_deviation_m_mean"] = _mean_or_empty(route_deviation_values)
+        summary["route_deviation_m_max"] = max(route_deviation_values)
+    summary["route_progress_delta_negative_raw_ratio"] = _ratio_or_empty(
+        summary["route_progress_delta_negative_raw_rows"],
+        diagnostic_rows)
+    summary["route_progress_raw_negative_ratio"] = _ratio_or_empty(
+        summary["route_progress_raw_negative_rows"],
+        diagnostic_rows)
+    summary["route_progress_monotonic_negative_ratio"] = _ratio_or_empty(
+        summary["route_progress_monotonic_negative_rows"],
+        diagnostic_rows)
+    summary["route_deviation_valid_ratio"] = _ratio_or_empty(
+        summary["route_deviation_valid_rows"],
+        diagnostic_rows)
+    summary["planned_stop_ratio"] = _ratio_or_empty(
+        summary["planned_stop_rows"],
+        diagnostic_rows)
+    summary["low_speed_not_planned_ratio"] = _ratio_or_empty(
+        summary["low_speed_not_planned_rows"],
+        diagnostic_rows)
+    summary["progress_stall_ratio"] = _ratio_or_empty(
+        summary["progress_stall_rows"],
+        diagnostic_rows)
+    summary["route_progress_stall_ratio"] = _ratio_or_empty(
+        summary["route_progress_stall_rows"],
+        diagnostic_rows)
+    summary["progress_stall_count_max"] = (
+        max(progress_stall_counts) if progress_stall_counts else "")
+    summary["negative_progress_ratio"] = _ratio_or_empty(
+        summary["negative_progress_rows"],
+        diagnostic_rows)
+    summary["mean_route_progress_rate_mps"] = _mean_or_empty(route_progress_rates)
+    summary["mean_abs_speed_error"] = _mean_or_empty(abs_speed_errors)
+    summary["collision_count"] = max(collision_counts) if collision_counts else 0
+    summary["lane_invasion_count"] = max(lane_counts) if lane_counts else 0
+    summary["red_light_count"] = max(red_light_counts) if red_light_counts else 0
+    summary["blocked_vehicle_count"] = max(blocked_counts) if blocked_counts else 0
+    summary["route_timeout_count"] = max(timeout_counts) if timeout_counts else 0
     summary["rl_observation_clip_count_max"] = (
         max(clip_counts) if clip_counts else "")
+    _update_min_mean_max(summary, "safety_gate_active_speed", gate_active_speeds)
+    _update_min_mean_max(summary, "safety_gate_active_roll", gate_active_rolls)
+    _update_min_mean_max(
+        summary,
+        "safety_gate_active_lateral_acc",
+        gate_active_lateral_accs)
+    _update_min_mean_max(
+        summary,
+        "safety_gate_active_yaw_rate",
+        gate_active_yaw_rates)
+    _update_abs_mean_max(
+        summary,
+        "safety_gate_active_abs_roll",
+        gate_active_rolls)
+    _update_abs_mean_max(
+        summary,
+        "safety_gate_active_abs_lateral_acc",
+        gate_active_lateral_accs)
+    _update_abs_mean_max(
+        summary,
+        "safety_gate_active_abs_yaw_rate",
+        gate_active_yaw_rates)
     return summary
 
 
@@ -1157,6 +2008,41 @@ def _append_float(values: List[float], value: Any) -> None:
 
 def _mean_or_empty(values: Sequence[float]) -> Any:
     return sum(values) / float(len(values)) if values else ""
+
+
+def _ratio_or_empty(numerator: Any, denominator: Any) -> Any:
+    numerator_value = safe_float(numerator)
+    denominator_value = safe_float(denominator)
+    if (
+            numerator_value is None or
+            denominator_value is None or
+            denominator_value <= 0.0):
+        return ""
+    return numerator_value / denominator_value
+
+
+def _update_min_mean_max(
+    summary: Dict[str, Any],
+    prefix: str,
+    values: Sequence[float],
+) -> None:
+    if not values:
+        return
+    summary["%s_min" % prefix] = min(values)
+    summary["%s_mean" % prefix] = _mean_or_empty(values)
+    summary["%s_max" % prefix] = max(values)
+
+
+def _update_abs_mean_max(
+    summary: Dict[str, Any],
+    prefix: str,
+    values: Sequence[float],
+) -> None:
+    if not values:
+        return
+    abs_values = [abs(value) for value in values]
+    summary["%s_mean" % prefix] = _mean_or_empty(abs_values)
+    summary["%s_max" % prefix] = max(abs_values)
 
 
 def prefixed_metrics(prefix: str, metrics: Mapping[str, Any]) -> Dict[str, Any]:
@@ -1362,6 +2248,548 @@ def write_comparison_summary(
     return path, comparison_rows
 
 
+PHASE2_INFRACTION_FIELDS = (
+    "collisions_layout",
+    "collisions_pedestrian",
+    "collisions_vehicle",
+    "red_light",
+    "stop_infraction",
+    "outside_route_lanes",
+    "route_dev",
+    "vehicle_blocked",
+    "route_timeout",
+    "scenario_timeouts",
+    "min_speed_infractions",
+)
+
+
+PHASE2_BASELINE_BY_SCENARIO = {
+    "S7_rl_zero_residual_pid": "S2_pid",
+    "S8_rl_zero_residual_skyhook": "S3_skyhook",
+}
+
+PHASE2C_CANARY_BY_SCENARIO = {
+    "S8_rl_zero_residual_skyhook": {
+        "role": "zero_reference",
+        "expected_mean_action": 0.0,
+        "expected_abs_action": 0.0,
+        "expect_nonzero_residual": False,
+    },
+    "S9_rl_const_plus_0p02_skyhook": {
+        "role": "constant_positive_canary",
+        "expected_mean_action": 0.02,
+        "expected_abs_action": 0.02,
+        "expect_nonzero_residual": True,
+    },
+    "S10_rl_const_minus_0p02_skyhook": {
+        "role": "constant_negative_canary",
+        "expected_mean_action": -0.02,
+        "expected_abs_action": 0.02,
+        "expect_nonzero_residual": True,
+    },
+    "S11_rl_random_small_skyhook": {
+        "role": "random_small_canary",
+        "expected_mean_action": "",
+        "expected_abs_action": "",
+        "expect_nonzero_residual": True,
+    },
+    "S12_rl_const_action_plus_0p25_skyhook": {
+        "role": "constant_positive_canary",
+        "expected_mean_action": 0.25,
+        "expected_abs_action": 0.25,
+        "expect_nonzero_residual": True,
+    },
+    "S13_rl_const_action_minus_0p25_skyhook": {
+        "role": "constant_negative_canary",
+        "expected_mean_action": -0.25,
+        "expected_abs_action": 0.25,
+        "expect_nonzero_residual": True,
+    },
+    "S14_rl_random_action_0p10_skyhook": {
+        "role": "random_action_canary",
+        "expected_mean_action": "",
+        "expected_abs_action": "",
+        "expect_nonzero_residual": True,
+    },
+}
+
+
+def phase2_acceptance_rows(
+    summary_rows: Sequence[Mapping[str, Any]],
+) -> List[Dict[str, Any]]:
+    by_seed_scenario: Dict[Tuple[Any, str], Mapping[str, Any]] = {
+        (row.get("seed"), row.get("scenario")): row
+        for row in summary_rows
+    }
+    rows: List[Dict[str, Any]] = []
+    for row in summary_rows:
+        scenario_name = str(row.get("scenario", ""))
+        controller = str(row.get("controller", ""))
+        baseline_scenario = PHASE2_BASELINE_BY_SCENARIO.get(scenario_name, "")
+        failed_checks: List[str] = []
+
+        route_score_ok = _score_is_100(row.get("score_route"))
+        if not route_score_ok:
+            failed_checks.append("route_score")
+        composed_score_ok = _score_is_100(row.get("score_composed"))
+        if not composed_score_ok:
+            failed_checks.append("score_composed")
+        infraction_ok = _infractions_are_zero(row)
+        if not infraction_ok:
+            failed_checks.append("infractions")
+
+        uses_api = _truthy(row.get("uses_suspension_api"))
+        verification_ok = (
+            not uses_api or
+            _positive_number(row.get("sidecar_command_verifies")))
+        if not verification_ok:
+            failed_checks.append("verification")
+
+        policy_available_ratio = safe_float(row.get("rl_policy_available_ratio"))
+        policy_available_ok = ""
+        fallback_ok = ""
+        zero_action_ok = ""
+        zero_residual_ok = ""
+        pair_score_match_ok = ""
+        paired_baseline_found = ""
+
+        if controller.startswith("rl_zero_residual"):
+            policy_available_ok = int(
+                policy_available_ratio is not None and
+                policy_available_ratio >= 0.99)
+            if not policy_available_ok:
+                failed_checks.append("policy_available_ratio")
+            fallback_ok = int(_zero_number(row.get("rl_fallback_rows")))
+            if not fallback_ok:
+                failed_checks.append("fallback_rows")
+            zero_action_ok = int(
+                _zero_number(row.get("rl_mean_abs_action")) and
+                _zero_number(row.get("rl_nonzero_action_rows")))
+            if not zero_action_ok:
+                failed_checks.append("rl_action")
+            zero_residual_ok = int(
+                _zero_number(row.get("rl_mean_abs_residual_damper")) and
+                _zero_number(row.get("rl_nonzero_residual_rows")))
+            if not zero_residual_ok:
+                failed_checks.append("rl_residual")
+
+            baseline = by_seed_scenario.get((row.get("seed"), baseline_scenario))
+            paired_baseline_found = int(baseline is not None)
+            if baseline is None:
+                pair_score_match_ok = "not_applicable"
+            else:
+                score_delta = _delta(row.get("score_route"), baseline.get("score_route"))
+                penalty_delta = _delta(row.get("score_penalty"), baseline.get("score_penalty"))
+                pair_score_match_ok = int(
+                    score_delta == 0.0 and penalty_delta == 0.0)
+                if not pair_score_match_ok:
+                    failed_checks.append("paired_score")
+        else:
+            baseline = None
+
+        acceptance = {
+            "seed": row.get("seed", ""),
+            "scenario": scenario_name,
+            "label": row.get("label", ""),
+            "controller": controller,
+            "phase2_role": (
+                "rl_zero_residual"
+                if controller.startswith("rl_zero_residual")
+                else "route_or_api_baseline"),
+            "phase2_status": "pass" if not failed_checks else "fail",
+            "failed_checks": ";".join(failed_checks),
+            "baseline_scenario": baseline_scenario,
+            "route_score_ok": int(route_score_ok),
+            "score_composed_ok": int(composed_score_ok),
+            "infraction_ok": int(infraction_ok),
+            "verification_ok": int(verification_ok),
+            "sidecar_command_verifies": row.get("sidecar_command_verifies", ""),
+            "policy_available_ratio": (
+                policy_available_ratio if policy_available_ratio is not None else ""),
+            "policy_available_ok": policy_available_ok,
+            "rl_fallback_rows": row.get("rl_fallback_rows", ""),
+            "fallback_ok": fallback_ok,
+            "rl_mean_abs_action": row.get("rl_mean_abs_action", ""),
+            "zero_action_ok": zero_action_ok,
+            "rl_mean_abs_residual_damper": row.get(
+                "rl_mean_abs_residual_damper",
+                ""),
+            "low_speed_mask_ratio": row.get("low_speed_mask_ratio", ""),
+            "hard_safety_gate_ratio": row.get("hard_safety_gate_ratio", ""),
+            "soft_safety_gain_ratio": row.get("soft_safety_gain_ratio", ""),
+            "effective_control_ratio": row.get("effective_control_ratio", ""),
+            "safety_gate_active_ratio": row.get("safety_gate_active_ratio", ""),
+            "safety_gate_active_rows": row.get("safety_gate_active_rows", ""),
+            "safety_gate_reason_counts": row.get("safety_gate_reason_counts", ""),
+            "safety_gate_active_speed_min": row.get(
+                "safety_gate_active_speed_min",
+                ""),
+            "safety_gate_active_speed_mean": row.get(
+                "safety_gate_active_speed_mean",
+                ""),
+            "safety_gate_active_speed_max": row.get(
+                "safety_gate_active_speed_max",
+                ""),
+            "safety_gate_active_roll_min": row.get(
+                "safety_gate_active_roll_min",
+                ""),
+            "safety_gate_active_roll_mean": row.get(
+                "safety_gate_active_roll_mean",
+                ""),
+            "safety_gate_active_roll_max": row.get(
+                "safety_gate_active_roll_max",
+                ""),
+            "safety_gate_active_lateral_acc_min": row.get(
+                "safety_gate_active_lateral_acc_min",
+                ""),
+            "safety_gate_active_lateral_acc_mean": row.get(
+                "safety_gate_active_lateral_acc_mean",
+                ""),
+            "safety_gate_active_lateral_acc_max": row.get(
+                "safety_gate_active_lateral_acc_max",
+                ""),
+            "safety_gate_active_yaw_rate_min": row.get(
+                "safety_gate_active_yaw_rate_min",
+                ""),
+            "safety_gate_active_yaw_rate_mean": row.get(
+                "safety_gate_active_yaw_rate_mean",
+                ""),
+            "safety_gate_active_yaw_rate_max": row.get(
+                "safety_gate_active_yaw_rate_max",
+                ""),
+            "zero_residual_ok": zero_residual_ok,
+            "paired_baseline_found": paired_baseline_found,
+            "pair_score_match_ok": pair_score_match_ok,
+        }
+        if baseline is not None:
+            acceptance.update({
+                "score_route_delta_vs_baseline": _delta(
+                    row.get("score_route"),
+                    baseline.get("score_route")),
+                "score_composed_delta_vs_baseline": _delta(
+                    row.get("score_composed"),
+                    baseline.get("score_composed")),
+                "score_penalty_delta_vs_baseline": _delta(
+                    row.get("score_penalty"),
+                    baseline.get("score_penalty")),
+                "warmup_excluded_comfort_score_delta_vs_baseline": _delta(
+                    row.get("warmup_excluded_comfort_comfort_score"),
+                    baseline.get("warmup_excluded_comfort_comfort_score")),
+                "warmup_excluded_rms_roll_delta_vs_baseline": _delta(
+                    row.get("warmup_excluded_stability_rms_roll"),
+                    baseline.get("warmup_excluded_stability_rms_roll")),
+            })
+        rows.append(acceptance)
+    return rows
+
+
+def phase2c_acceptance_rows(
+    summary_rows: Sequence[Mapping[str, Any]],
+) -> List[Dict[str, Any]]:
+    rows: List[Dict[str, Any]] = []
+    for row in summary_rows:
+        scenario_name = str(row.get("scenario", ""))
+        expectation = PHASE2C_CANARY_BY_SCENARIO.get(scenario_name)
+        if not expectation:
+            continue
+
+        failed_checks: List[str] = []
+        route_score_ok = _score_is_100(row.get("score_route"))
+        if not route_score_ok:
+            failed_checks.append("route_score")
+        composed_score_ok = _score_is_100(row.get("score_composed"))
+        if not composed_score_ok:
+            failed_checks.append("score_composed")
+        infraction_ok = _infractions_are_zero(row)
+        if not infraction_ok:
+            failed_checks.append("infractions")
+        verification_ok = _positive_number(row.get("sidecar_command_verifies"))
+        if not verification_ok:
+            failed_checks.append("verification")
+
+        policy_available_ratio = safe_float(row.get("rl_policy_available_ratio"))
+        policy_available_ok = int(
+            policy_available_ratio is not None and
+            policy_available_ratio >= 0.99)
+        if not policy_available_ok:
+            failed_checks.append("policy_available_ratio")
+
+        fallback_reason_ok = int(_fallback_reasons_are_allowed(
+            row.get("rl_fallback_reasons", ""),
+            ("safety_gate_zero",)))
+        if not fallback_reason_ok:
+            failed_checks.append("fallback_reason")
+
+        expected_mean_action = expectation["expected_mean_action"]
+        expected_abs_action = expectation["expected_abs_action"]
+        mean_action = safe_float(row.get("rl_mean_action"))
+        mean_abs_action = safe_float(row.get("rl_mean_abs_action"))
+        diagnostic_rows = safe_float(row.get("rl_diagnostic_rows")) or 0.0
+        nonzero_action_rows = safe_float(row.get("rl_nonzero_action_rows")) or 0.0
+        nonzero_residual_rows = safe_float(row.get("rl_nonzero_residual_rows")) or 0.0
+        nonzero_action_ratio = (
+            nonzero_action_rows / diagnostic_rows
+            if diagnostic_rows > 0.0 else "")
+
+        if expected_mean_action == "":
+            action_path_ok = int(
+                mean_abs_action is not None and
+                mean_abs_action > 1.0e-3 and
+                nonzero_action_rows > 0.0)
+        else:
+            action_path_ok = int(
+                _near_number(mean_action, float(expected_mean_action), 1.0e-6) and
+                _near_number(mean_abs_action, float(expected_abs_action), 1.0e-6))
+        if not action_path_ok:
+            failed_checks.append("action_path")
+
+        mean_abs_residual = safe_float(row.get("rl_mean_abs_residual_damper"))
+        if expectation["expect_nonzero_residual"]:
+            residual_path_ok = int(
+                mean_abs_residual is not None and
+                mean_abs_residual > 1.0e-9 and
+                nonzero_residual_rows > 0.0)
+        else:
+            residual_path_ok = int(
+                _zero_number(row.get("rl_nonzero_residual_rows")) and
+                _zero_number(row.get("rl_mean_abs_residual_damper")))
+        if not residual_path_ok:
+            failed_checks.append("residual_path")
+
+        rows.append({
+            "seed": row.get("seed", ""),
+            "scenario": scenario_name,
+            "label": row.get("label", ""),
+            "controller": row.get("controller", ""),
+            "phase2c_role": expectation["role"],
+            "phase2c_status": "pass" if not failed_checks else "fail",
+            "failed_checks": ";".join(failed_checks),
+            "route_score_ok": int(route_score_ok),
+            "score_composed_ok": int(composed_score_ok),
+            "infraction_ok": int(infraction_ok),
+            "verification_ok": int(verification_ok),
+            "policy_available_ok": policy_available_ok,
+            "fallback_reason_ok": fallback_reason_ok,
+            "action_path_ok": action_path_ok,
+            "residual_path_ok": residual_path_ok,
+            "expected_mean_action": expected_mean_action,
+            "expected_abs_action": expected_abs_action,
+            "rl_diagnostic_rows": row.get("rl_diagnostic_rows", ""),
+            "rl_policy_available_ratio": row.get(
+                "rl_policy_available_ratio",
+                ""),
+            "rl_fallback_rows": row.get("rl_fallback_rows", ""),
+            "rl_fallback_reasons": row.get("rl_fallback_reasons", ""),
+            "rl_nonzero_action_rows": row.get("rl_nonzero_action_rows", ""),
+            "rl_nonzero_action_ratio": nonzero_action_ratio,
+            "rl_mean_action": row.get("rl_mean_action", ""),
+            "rl_mean_abs_action": row.get("rl_mean_abs_action", ""),
+            "rl_nonzero_residual_rows": row.get(
+                "rl_nonzero_residual_rows",
+                ""),
+            "rl_mean_residual_damper": row.get(
+                "rl_mean_residual_damper",
+                ""),
+            "rl_mean_abs_residual_damper": row.get(
+                "rl_mean_abs_residual_damper",
+                ""),
+            "sidecar_command_verifies": row.get("sidecar_command_verifies", ""),
+            "low_speed_mask_ratio": row.get("low_speed_mask_ratio", ""),
+            "hard_safety_gate_ratio": row.get("hard_safety_gate_ratio", ""),
+            "soft_safety_gain_ratio": row.get("soft_safety_gain_ratio", ""),
+            "effective_control_ratio": row.get("effective_control_ratio", ""),
+            "safety_gate_active_ratio": row.get("safety_gate_active_ratio", ""),
+            "safety_gate_active_rows": row.get("safety_gate_active_rows", ""),
+            "safety_gate_reason_counts": row.get(
+                "safety_gate_reason_counts",
+                ""),
+        })
+    return rows
+
+
+def write_phase2_acceptance_summary(
+    output_dir: str,
+    summary_rows: Sequence[Mapping[str, Any]],
+) -> Tuple[str, List[Dict[str, Any]]]:
+    rows = phase2_acceptance_rows(summary_rows)
+    path = os.path.join(output_dir, "phase2_online_dummy_acceptance.csv")
+    write_csv_rows(
+        path,
+        rows,
+        (
+            "seed",
+            "scenario",
+            "label",
+            "controller",
+            "phase2_role",
+            "phase2_status",
+            "failed_checks",
+            "baseline_scenario",
+            "route_score_ok",
+            "score_composed_ok",
+            "infraction_ok",
+            "verification_ok",
+            "sidecar_command_verifies",
+            "policy_available_ratio",
+            "policy_available_ok",
+            "rl_fallback_rows",
+            "fallback_ok",
+            "rl_mean_abs_action",
+            "zero_action_ok",
+            "rl_mean_abs_residual_damper",
+            "low_speed_mask_ratio",
+            "hard_safety_gate_ratio",
+            "soft_safety_gain_ratio",
+            "effective_control_ratio",
+            "safety_gate_active_ratio",
+            "safety_gate_active_rows",
+            "safety_gate_reason_counts",
+            "safety_gate_active_speed_min",
+            "safety_gate_active_speed_mean",
+            "safety_gate_active_speed_max",
+            "safety_gate_active_roll_min",
+            "safety_gate_active_roll_mean",
+            "safety_gate_active_roll_max",
+            "safety_gate_active_lateral_acc_min",
+            "safety_gate_active_lateral_acc_mean",
+            "safety_gate_active_lateral_acc_max",
+            "safety_gate_active_yaw_rate_min",
+            "safety_gate_active_yaw_rate_mean",
+            "safety_gate_active_yaw_rate_max",
+            "zero_residual_ok",
+            "paired_baseline_found",
+            "pair_score_match_ok",
+        ))
+    return path, rows
+
+
+def write_phase2c_acceptance_summary(
+    output_dir: str,
+    summary_rows: Sequence[Mapping[str, Any]],
+) -> Tuple[str, List[Dict[str, Any]]]:
+    rows = phase2c_acceptance_rows(summary_rows)
+    path = os.path.join(output_dir, "phase2c_nonzero_action_acceptance.csv")
+    write_csv_rows(
+        path,
+        rows,
+        (
+            "seed",
+            "scenario",
+            "label",
+            "controller",
+            "phase2c_role",
+            "phase2c_status",
+            "failed_checks",
+            "route_score_ok",
+            "score_composed_ok",
+            "infraction_ok",
+            "verification_ok",
+            "policy_available_ok",
+            "fallback_reason_ok",
+            "action_path_ok",
+            "residual_path_ok",
+            "expected_mean_action",
+            "expected_abs_action",
+            "rl_diagnostic_rows",
+            "rl_policy_available_ratio",
+            "rl_fallback_rows",
+            "rl_fallback_reasons",
+            "rl_nonzero_action_rows",
+            "rl_nonzero_action_ratio",
+            "rl_mean_action",
+            "rl_mean_abs_action",
+            "rl_nonzero_residual_rows",
+            "rl_mean_residual_damper",
+            "rl_mean_abs_residual_damper",
+            "sidecar_command_verifies",
+            "low_speed_mask_ratio",
+            "hard_safety_gate_ratio",
+            "soft_safety_gain_ratio",
+            "effective_control_ratio",
+            "safety_gate_active_ratio",
+            "safety_gate_active_rows",
+            "safety_gate_reason_counts",
+        ))
+    return path, rows
+
+
+def _score_is_100(value: Any) -> bool:
+    number = safe_float(value)
+    return number is not None and abs(number - 100.0) <= 1.0e-9
+
+
+def _truthy(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value in ("", None):
+        return False
+    if isinstance(value, str):
+        return value.strip().lower() not in ("0", "false", "none", "no")
+    return bool(value)
+
+
+def _positive_number(value: Any) -> bool:
+    number = safe_float(value)
+    return number is not None and number > 0.0
+
+
+def _negative_number(value: Any) -> bool:
+    number = safe_float(value)
+    return number is not None and number < -1.0e-9
+
+
+def _raw_negative_progress(row: Mapping[str, Any]) -> bool:
+    return (
+        _positive_number(row.get("route_progress_negative_raw")) or
+        _negative_number(row.get("route_progress_raw_negative_delta_m")) or
+        _negative_number(row.get("route_delta_progress_m")))
+
+
+def _zero_number(value: Any) -> bool:
+    number = safe_float(value)
+    return number is not None and abs(number) <= 1.0e-12
+
+
+def _near_number(value: Any, expected: float, tolerance: float) -> bool:
+    number = safe_float(value)
+    return (
+        number is not None and
+        abs(number - expected) <= abs(float(tolerance)))
+
+
+def _fallback_reasons_are_allowed(
+    value: Any,
+    allowed_reasons: Sequence[str],
+) -> bool:
+    reasons = [
+        item
+        for item in str(value or "").split(";")
+        if item
+    ]
+    allowed = set(allowed_reasons)
+    return all(reason in allowed for reason in reasons)
+
+
+def _infractions_are_zero(row: Mapping[str, Any]) -> bool:
+    for field in PHASE2_INFRACTION_FIELDS:
+        value = row.get(field, "")
+        if value in ("", None, "[]", "{}", "0", "0.0"):
+            continue
+        number = safe_float(value)
+        if number is not None and abs(number) <= 1.0e-12:
+            continue
+        return False
+    return True
+
+
+def _delta(left: Any, right: Any) -> Any:
+    left_value = safe_float(left)
+    right_value = safe_float(right)
+    if left_value is None or right_value is None:
+        return ""
+    return left_value - right_value
+
+
 def run_scenario(
     args: argparse.Namespace,
     scenario: Mapping[str, Any],
@@ -1503,14 +2931,116 @@ def write_suite_summary(output_dir: str, rows: Sequence[Mapping[str, Any]]) -> T
         "sidecar_command_verifies",
         "sidecar_fatal_errors",
         "sidecar_runtime_errors",
+        "rl_diagnostic_rows",
         "rl_policy_available_rows",
+        "rl_policy_available_ratio",
+        "rl_fallback_rows",
         "rl_fallback_reasons",
+        "rl_zero_action_rows",
+        "rl_nonzero_action_rows",
+        "rl_zero_residual_rows",
+        "rl_nonzero_residual_rows",
         "rl_mean_safety_gain",
+        "rl_mean_action",
         "rl_mean_abs_action",
+        "rl_mean_residual_damper",
         "rl_mean_abs_residual_damper",
         "rl_observation_clip_count_max",
+        "low_speed_mask_ratio",
+        "low_speed_mask_rows",
+        "hard_safety_gate_ratio",
+        "hard_safety_gate_rows",
+        "soft_safety_gain_ratio",
+        "soft_safety_gain_rows",
+        "effective_control_ratio",
+        "safety_gate_active_ratio",
+        "safety_gate_active_rows",
+        "safety_gate_reason_counts",
+        "safety_gate_active_speed_min",
+        "safety_gate_active_speed_mean",
+        "safety_gate_active_speed_max",
+        "safety_gate_active_roll_min",
+        "safety_gate_active_roll_mean",
+        "safety_gate_active_roll_max",
+        "safety_gate_active_abs_roll_mean",
+        "safety_gate_active_abs_roll_max",
+        "safety_gate_active_lateral_acc_min",
+        "safety_gate_active_lateral_acc_mean",
+        "safety_gate_active_lateral_acc_max",
+        "safety_gate_active_abs_lateral_acc_mean",
+        "safety_gate_active_abs_lateral_acc_max",
+        "safety_gate_active_yaw_rate_min",
+        "safety_gate_active_yaw_rate_mean",
+        "safety_gate_active_yaw_rate_max",
+        "safety_gate_active_abs_yaw_rate_mean",
+        "safety_gate_active_abs_yaw_rate_max",
         "planning_available_rows",
         "planning_sources",
+        "policy_available_ratio",
+        "fallback_ratio",
+        "observation_clip_ratio",
+        "mean_abs_action",
+        "mean_abs_residual_damper",
+        "mean_reward_total",
+        "mean_reward_comfort",
+        "mean_reward_stability",
+        "mean_reward_task",
+        "mean_reward_action",
+        "mean_reward_safety",
+        "reward_rows",
+        "reward_row_ratio",
+        "mean_reward_cost_comfort",
+        "mean_reward_cost_stability",
+        "mean_reward_cost_task",
+        "mean_reward_cost_action",
+        "mean_reward_cost_safety",
+        "mean_reward_term_action_mag",
+        "mean_reward_term_action_rate",
+        "mean_reward_term_damper_rate",
+        "mean_reward_term_baseline_dev",
+        "mean_reward_term_low_speed_not_planned",
+        "mean_reward_term_progress_stall",
+        "mean_reward_term_route_deviation",
+        "mean_reward_term_abs_speed_error",
+        "mean_reward_route_deviation_used_ratio",
+        "reward_route_deviation_used_rows",
+        "reward_route_deviation_enabled_rows",
+        "reward_route_deviation_valid_rows",
+        "reward_task_capped_without_infraction_rows",
+        "reward_task_capped_without_infraction_ratio",
+        "route_progress_available_rows",
+        "route_progress_available_ratio",
+        "route_progress_fraction_max",
+        "route_progress_monotonic_fraction_max",
+        "route_completion_proxy",
+        "route_progress_delta_negative_raw_rows",
+        "route_progress_delta_negative_raw_ratio",
+        "route_progress_raw_negative_rows",
+        "route_progress_raw_negative_ratio",
+        "route_progress_monotonic_negative_rows",
+        "route_progress_monotonic_negative_ratio",
+        "route_deviation_m_mean",
+        "route_deviation_m_max",
+        "route_deviation_valid_rows",
+        "route_deviation_valid_ratio",
+        "planned_stop_rows",
+        "planned_stop_ratio",
+        "low_speed_not_planned_rows",
+        "low_speed_not_planned_ratio",
+        "progress_stall_rows",
+        "progress_stall_ratio",
+        "route_progress_stall_rows",
+        "route_progress_stall_ratio",
+        "progress_stall_count_max",
+        "negative_progress_rows",
+        "negative_progress_ratio",
+        "mean_route_progress_rate_mps",
+        "mean_abs_speed_error",
+        "collision_count",
+        "lane_invasion_count",
+        "red_light_count",
+        "blocked_vehicle_count",
+        "route_timeout_count",
         "comfort_comfort_score",
         "comfort_rms_vertical_acc",
         "comfort_rms_lateral_acc",
@@ -1614,6 +3144,13 @@ def main(args: argparse.Namespace) -> None:
             if args.planning_preview_jsonl else ""),
         "planning_max_frame_lag": args.planning_max_frame_lag,
         "planning_horizon_dt": args.planning_horizon_dt,
+        "reward_nominal_target_speed": args.reward_nominal_target_speed,
+        "reward_low_speed_threshold_mps": args.reward_low_speed_threshold_mps,
+        "reward_min_progress_rate_mps": args.reward_min_progress_rate_mps,
+        "reward_planned_stop_brake_threshold": (
+            args.reward_planned_stop_brake_threshold),
+        "reward_progress_stall_steps": args.reward_progress_stall_steps,
+        "reward_progress_stall_epsilon_m": args.reward_progress_stall_epsilon_m,
         "command": command,
     })
 
@@ -1630,12 +3167,29 @@ def main(args: argparse.Namespace) -> None:
         output_dir,
         rows,
         baseline_scenario=args.baseline_scenario)
+    phase2_path, _ = write_phase2_acceptance_summary(output_dir, rows)
+    phase2c_path, phase2c_rows = write_phase2c_acceptance_summary(
+        output_dir,
+        rows)
+    phase3_csv_path, phase3_json_path, phase3_rows = (
+        write_phase3_reward_sanity_report(output_dir, rows))
+    phase3b_csv_path, phase3b_json_path, phase3b_rows = (
+        write_phase3b_reward_calibration_report(output_dir, rows))
 
     print("")
     print("Wrote suite outputs:")
     print("  %s" % csv_path)
     print("  %s" % json_path)
     print("  %s" % comparison_path)
+    print("  %s" % phase2_path)
+    if phase2c_rows:
+        print("  %s" % phase2c_path)
+    if phase3_rows:
+        print("  %s" % phase3_csv_path)
+        print("  %s" % phase3_json_path)
+    if phase3b_rows:
+        print("  %s" % phase3b_csv_path)
+        print("  %s" % phase3b_json_path)
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
@@ -1687,7 +3241,14 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default="stock,identity,pid",
         help="comma-separated scenarios: stock,identity,pid,skyhook,"
         "rl_residual_skyhook,rl_residual_pid,"
-        "rl_residual_skyhook_no_planning "
+        "rl_residual_skyhook_no_planning,"
+        "rl_zero_residual_pid,rl_zero_residual_skyhook,"
+        "rl_const_plus_0p02_skyhook,"
+        "rl_const_minus_0p02_skyhook,"
+        "rl_random_small_skyhook,"
+        "rl_const_action_plus_0p25_skyhook,"
+        "rl_const_action_minus_0p25_skyhook,"
+        "rl_random_action_0p10_skyhook "
         "(default: stock,identity,pid)")
     parser.add_argument(
         "--baseline-scenario",
@@ -1742,6 +3303,36 @@ def build_arg_parser() -> argparse.ArgumentParser:
         type=float,
         help="fallback planning preview horizon dt in seconds (default: 0.1)")
     parser.add_argument(
+        "--reward-nominal-target-speed",
+        default=8.0,
+        type=float,
+        help="nominal target speed used when planning preview is empty (default: 8.0)")
+    parser.add_argument(
+        "--reward-low-speed-threshold-mps",
+        default=0.5,
+        type=float,
+        help="speed threshold for low-speed-not-planned task diagnostics (default: 0.5)")
+    parser.add_argument(
+        "--reward-min-progress-rate-mps",
+        default=0.5,
+        type=float,
+        help="minimum progress rate before low-speed/stall diagnostics (default: 0.5)")
+    parser.add_argument(
+        "--reward-planned-stop-brake-threshold",
+        default=0.25,
+        type=float,
+        help="brake threshold that suppresses low-speed-not-planned (default: 0.25)")
+    parser.add_argument(
+        "--reward-progress-stall-steps",
+        default=10,
+        type=int,
+        help="consecutive flat-progress steps before progress_stall=1 (default: 10)")
+    parser.add_argument(
+        "--reward-progress-stall-epsilon-m",
+        default=0.1,
+        type=float,
+        help="progress delta tolerance for progress_stall detection in meters (default: 0.1)")
+    parser.add_argument(
         "--default-dt",
         default=0.05,
         type=float,
@@ -1753,10 +3344,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="tail fraction for stability tail metrics (default: 0.30)")
     parser.add_argument(
         "--metric-warmup-seconds",
-        default=2.0,
+        default=3.0,
         type=float,
         help="initial episode seconds excluded from warmup_excluded metrics "
-        "(default: 2.0; 0 disables exclusion)")
+        "(default: 3.0; 0 disables exclusion)")
     parser.add_argument(
         "--verify-every",
         default=50,

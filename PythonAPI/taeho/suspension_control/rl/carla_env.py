@@ -43,6 +43,7 @@ class SuspensionCarlaEnv(_BaseEnv):
         reward_config: Optional[SuspensionRewardConfig] = None,
         residual_scale: float = 0.08,
         wheel_count: int = 4,
+        initial_transition_skip_seconds: float = 3.0,
     ):
         if not dry_run:
             raise NotImplementedError(
@@ -52,6 +53,9 @@ class SuspensionCarlaEnv(_BaseEnv):
         self.dt = float(dt)
         self.residual_scale = float(residual_scale)
         self.wheel_count = int(wheel_count)
+        self.initial_transition_skip_seconds = max(
+            0.0,
+            float(initial_transition_skip_seconds))
         self.reward = SuspensionReward(reward_config)
         self.observation_builder = ObservationBuilder(wheel_count=self.wheel_count)
         self.baseline_controller = SkyhookController()
@@ -116,6 +120,7 @@ class SuspensionCarlaEnv(_BaseEnv):
             terminal=(self.step_index + 1) >= self.max_steps,
             dt=self.dt)
         reward_value, reward_diag = self.reward.compute(transition)
+        reward_value = self._mask_initial_reward(next_state, reward_value, reward_diag)
 
         self.previous_state = self.state
         self.state = next_state
@@ -197,6 +202,25 @@ class SuspensionCarlaEnv(_BaseEnv):
         speed = max(0.0, state.speed + 0.02 - 0.03 * mean_abs_action)
         return self._fake_state(self.step_index + 1, speed=speed)
 
+    def _mask_initial_reward(
+        self,
+        state: VehicleState,
+        reward_value: float,
+        reward_diag: Dict[str, float],
+    ) -> float:
+        if state.elapsed_seconds < self.initial_transition_skip_seconds:
+            reward_diag["reward_total_unmasked"] = float(reward_value)
+            reward_diag["reward_total"] = 0.0
+            reward_diag["reward_initial_masked"] = 1.0
+            reward_diag["reward_initial_skip_seconds"] = (
+                self.initial_transition_skip_seconds)
+            return 0.0
+        reward_diag["reward_total_unmasked"] = float(reward_value)
+        reward_diag["reward_initial_masked"] = 0.0
+        reward_diag["reward_initial_skip_seconds"] = (
+            self.initial_transition_skip_seconds)
+        return reward_value
+
 
 def _action_values(action: Sequence[float], wheel_count: int) -> Tuple[float, ...]:
     values = list(action or ())
@@ -232,3 +256,6 @@ def _array(values):
     if np is None:
         return list(values)
     return np.asarray(values, dtype=np.float32)
+
+
+SuspensionSyntheticEnv = SuspensionCarlaEnv
