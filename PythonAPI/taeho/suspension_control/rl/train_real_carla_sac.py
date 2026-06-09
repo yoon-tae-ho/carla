@@ -42,10 +42,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--route-script", default="")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=2000)
-    parser.add_argument("--timeout", type=float, default=10.0)
-    parser.add_argument("--hero-timeout-seconds", type=float, default=300.0)
-    parser.add_argument("--route-wait-timeout-seconds", type=float, default=10.0)
-    parser.add_argument("--connect-retry-seconds", type=float, default=0.5)
+    parser.add_argument("--timeout", type=float, default=120.0)
+    parser.add_argument("--hero-timeout-seconds", type=float, default=900.0)
+    parser.add_argument("--route-wait-timeout-seconds", type=float, default=120.0)
+    parser.add_argument("--connect-retry-seconds", type=float, default=1.0)
     parser.add_argument("--traffic-manager-port", type=int, default=8000)
     parser.add_argument("--role-name", default="hero")
     parser.add_argument("--actor-id", default="")
@@ -122,6 +122,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     learn_error = ""
     export_error = ""
+    backend_lifecycle = {}
     try:
         model.learn(
             total_timesteps=max(0, int(args.total_timesteps)),
@@ -151,8 +152,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             except Exception as export_exception:
                 export_error = str(export_exception)
     finally:
+        backend_lifecycle = _backend_lifecycle_summary(env)
         if hasattr(env, "close"):
             env.close()
+        backend_lifecycle.update(_backend_lifecycle_summary(env))
 
     _ensure_rollout_files(args.output_dir)
     summary = _write_training_summary(
@@ -163,7 +166,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         sb3_model_path=sb3_model_path,
         policy_path=policy_path,
         learn_error=learn_error,
-        export_error=export_error)
+        export_error=export_error,
+        backend_lifecycle=backend_lifecycle)
     _write_canary_artifacts(args.output_dir, summary)
     if learn_error:
         return _fail("Phase 4 training failed: %s" % learn_error)
@@ -395,6 +399,7 @@ def _write_training_summary(
     policy_path: str,
     learn_error: str,
     export_error: str,
+    backend_lifecycle: Mapping[str, Any] = (),
 ) -> Dict[str, Any]:
     summary = dict(task_summary_fields(rollout_rows))
     backend_counts = _backend_counts(rollout_rows)
@@ -434,6 +439,7 @@ def _write_training_summary(
             if args.eval_route_suite else
             "skipped_no_eval_route_suite"),
     })
+    summary.update(dict(backend_lifecycle or {}))
     path = os.path.join(args.output_dir, "training_summary.json")
     with open(path, "w") as json_file:
         json.dump(summary, json_file, indent=2, sort_keys=True)
@@ -468,6 +474,17 @@ def _backend_counts(rows: Sequence[Mapping[str, Any]]) -> Dict[str, int]:
         "fake_backend_used": fake,
         "real_backend_used": real,
     }
+
+
+def _backend_lifecycle_summary(env: Any) -> Dict[str, Any]:
+    backend = getattr(env, "backend", None)
+    if backend is None or not hasattr(backend, "lifecycle_summary"):
+        return {}
+    try:
+        summary = backend.lifecycle_summary()
+    except Exception as error:
+        return {"backend_lifecycle_summary_error": str(error)}
+    return dict(summary or {})
 
 
 def _as_int(value: Any) -> int:

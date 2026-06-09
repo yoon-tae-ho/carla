@@ -190,3 +190,93 @@ def test_rate_limit_enforced_across_compute_calls():
         context(state(frame=2), previous_state=state(frame=1))).command
     for left, right in zip(dampers(first), dampers(second)):
         assert abs(right - left) <= cfg.max_damper_delta_per_step + 1.0e-9
+
+
+def test_action_scale_zero_keeps_policy_available_but_zeroes_final_residual():
+    baseline = SuspensionCommand.uniform(damper_scale=1.0)
+    controller = ResidualRLController(
+        ResidualRLConfig(
+            allow_untrained_policy=True,
+            rl_action_scale=0.0,
+            max_damper_residual_scale=0.08,
+            max_damper_delta_per_step=1.0),
+        baseline_controller=ConstantBaseline(baseline),
+        policy=StaticPolicy([0.5, -0.5, 0.25, -0.25]))
+
+    output = controller.compute(context())
+
+    assert output.command.is_close(baseline, abs_tol=0.0, rel_tol=0.0)
+    assert output.diagnostics["rl_policy_available"] == 1
+    assert output.diagnostics["rl_mean_abs_action"] == 0.375
+    assert output.diagnostics["rl_action_scale"] == 0.0
+    assert abs(output.diagnostics["rl_mean_abs_raw_residual_damper"] - 0.03) <= 1.0e-12
+    assert output.diagnostics["rl_mean_abs_scaled_residual_damper"] == 0.0
+    assert output.diagnostics["rl_mean_abs_final_residual_damper"] == 0.0
+    assert output.diagnostics["rl_mean_abs_residual_damper"] == 0.0
+
+
+def test_action_scale_one_matches_existing_unscaled_path():
+    baseline = SuspensionCommand.uniform(damper_scale=1.0)
+    action = [0.25, -0.25, 0.5, -0.5]
+    cfg = ResidualRLConfig(
+        allow_untrained_policy=True,
+        rl_action_scale=1.0,
+        max_damper_residual_scale=0.08,
+        max_damper_delta_per_step=1.0)
+    scaled = ResidualRLController(
+        cfg,
+        baseline_controller=ConstantBaseline(baseline),
+        policy=StaticPolicy(action)).compute(context())
+    unscaled = ResidualRLController(
+        ResidualRLConfig(
+            allow_untrained_policy=True,
+            max_damper_residual_scale=0.08,
+            max_damper_delta_per_step=1.0),
+        baseline_controller=ConstantBaseline(baseline),
+        policy=StaticPolicy(action)).compute(context())
+
+    assert scaled.command.is_close(unscaled.command)
+    assert scaled.diagnostics["rl_mean_abs_residual_damper"] == (
+        unscaled.diagnostics["rl_mean_abs_residual_damper"])
+
+
+def test_action_scale_five_increases_residual_until_residual_clip():
+    baseline = SuspensionCommand.uniform(damper_scale=1.0)
+    controller = ResidualRLController(
+        ResidualRLConfig(
+            allow_untrained_policy=True,
+            rl_action_scale=5.0,
+            max_damper_residual_scale=0.08,
+            max_damper_delta_per_step=1.0),
+        baseline_controller=ConstantBaseline(baseline),
+        policy=StaticPolicy([0.25, 0.25, 0.25, 0.25]))
+
+    output = controller.compute(context())
+
+    assert dampers(output.command) == [1.08, 1.08, 1.08, 1.08]
+    assert output.diagnostics["rl_mean_abs_raw_residual_damper"] == 0.02
+    assert abs(output.diagnostics["rl_mean_abs_scaled_residual_damper"] - 0.1) <= 1.0e-12
+    assert output.diagnostics["rl_mean_abs_scale_clipped_residual_damper"] == 0.08
+    assert output.diagnostics["rl_residual_scale_clip"] == 1
+    assert output.diagnostics["rl_residual_saturation"] == 1
+
+
+def test_scripted_constant_residual_path_bypasses_policy_but_uses_projection():
+    baseline = SuspensionCommand.uniform(damper_scale=1.0)
+    controller = ResidualRLController(
+        ResidualRLConfig(
+            rl_residual_mode="scripted",
+            scripted_residual_kind="const_m0p05",
+            scripted_residual_value=-0.05,
+            max_damper_residual_scale=0.08,
+            max_damper_delta_per_step=1.0),
+        baseline_controller=ConstantBaseline(baseline))
+
+    output = controller.compute(context())
+
+    assert dampers(output.command) == [0.95, 0.95, 0.95, 0.95]
+    assert output.diagnostics["rl_residual_mode"] == "scripted"
+    assert output.diagnostics["rl_scripted_residual_kind"] == "const_m0p05"
+    assert output.diagnostics["rl_mean_abs_action"] == 0.0
+    assert output.diagnostics["rl_mean_raw_residual_damper"] == -0.05
+    assert abs(output.diagnostics["rl_mean_abs_final_residual_damper"] - 0.05) <= 1.0e-12

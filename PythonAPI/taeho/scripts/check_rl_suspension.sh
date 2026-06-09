@@ -22,6 +22,20 @@ PYTHON_BIN="${PYTHON:-python3}"
   suspension_control/rl/policy.py \
   suspension_control/rl/policy_export.py \
   suspension_control/rl/phase4_acceptance.py \
+  suspension_control/rl/phase4b_policy_eval_acceptance.py \
+  suspension_control/rl/phase4d_train_acceptance.py \
+  suspension_control/rl/phase4d_train_manifest.py \
+  suspension_control/rl/phase4d_eval_artifact.py \
+  suspension_control/rl/phase4d_eval_reference.py \
+  suspension_control/rl/phase4d_compare_only.py \
+  suspension_control/rl/phase4d_policy_selection.py \
+  suspension_control/rl/phase4d_stageA_repeat.py \
+  suspension_control/rl/phase4d_authority_sensitivity_common.py \
+  suspension_control/rl/phase4d_action_authority_sweep.py \
+  suspension_control/rl/phase4d_scripted_residual_sensitivity.py \
+  suspension_control/rl/phase4d_authority_sensitivity_report.py \
+  suspension_control/rl/phase4_route_health.py \
+  suspension_control/rl/phase4c_horizon_sweep.py \
   suspension_control/rl/train_sac.py \
   suspension_control/rl/train_real_carla_sac.py \
   suspension_control/rl/carla_env.py \
@@ -29,6 +43,8 @@ PYTHON_BIN="${PYTHON:-python3}"
   suspension_control/runtime/planning_provider.py \
   suspension_control/runtime/route_progress.py \
   suspension_control/rl/evaluate_policy.py \
+  suspension_control/metrics/comfort.py \
+  suspension_control/metrics/stability.py \
   suspension_zero_residual_equivalence.py \
   transfuser_suspension_control_suite.py
 
@@ -44,6 +60,28 @@ if "${PYTHON_BIN}" -c "import pytest" >/dev/null 2>&1; then
     tests/test_phase4_training_cli_fake.py \
     tests/test_phase4_acceptance_report.py \
     tests/test_phase4_eval_acceptance.py \
+    tests/test_phase4b_policy_eval_acceptance.py \
+    tests/test_phase4b_split_reference_acceptance.py \
+    tests/test_phase4d_infraction_parser.py \
+    tests/test_phase4d_train_acceptance.py \
+    tests/test_phase4d_train_manifest.py \
+    tests/test_phase4d_train_only_runner.py \
+    tests/test_phase4d_eval_artifact.py \
+    tests/test_phase4d_eval_s4_runner.py \
+    tests/test_phase4d_eval_reference.py \
+    tests/test_phase4d_eval_s8_runner.py \
+    tests/test_phase4d_compare_only.py \
+    tests/test_phase4d_compare_wrapper.py \
+    tests/test_phase4d_policy_selection.py \
+    tests/test_phase4d_stageA_repeat.py \
+    tests/test_phase4d_stageA_runner.py \
+    tests/test_phase4d_stageA_aggregate.py \
+    tests/test_phase4d_authority_sensitivity_plan.py \
+    tests/test_phase4d_runner_scripts.py \
+    tests/test_phase4b_policy_eval_runner.py \
+    tests/test_phase4_route_health_analyzer.py \
+    tests/test_phase4c_horizon_sweep_summary.py \
+    tests/test_phase4c_horizon_sweep_runner.py \
     tests/test_phase4_runner_help.py \
     tests/test_rl_residual_controller.py \
     tests/test_rl_observations.py \
@@ -62,7 +100,8 @@ if "${PYTHON_BIN}" -c "import pytest" >/dev/null 2>&1; then
     tests/test_live_backend_unavailable.py \
     tests/test_rl_carla_env.py \
     tests/test_zero_residual_equivalence.py \
-    tests/test_phase2_acceptance.py
+    tests/test_phase2_acceptance.py \
+    tests/test_profile_metric_source.py
 else
   "${PYTHON_BIN}" - <<'PY'
 import importlib
@@ -81,6 +120,28 @@ modules = (
     "tests.test_phase4_training_cli_fake",
     "tests.test_phase4_acceptance_report",
     "tests.test_phase4_eval_acceptance",
+    "tests.test_phase4b_policy_eval_acceptance",
+    "tests.test_phase4b_split_reference_acceptance",
+    "tests.test_phase4d_infraction_parser",
+    "tests.test_phase4d_train_acceptance",
+    "tests.test_phase4d_train_manifest",
+    "tests.test_phase4d_train_only_runner",
+    "tests.test_phase4d_eval_artifact",
+    "tests.test_phase4d_eval_s4_runner",
+    "tests.test_phase4d_eval_reference",
+    "tests.test_phase4d_eval_s8_runner",
+    "tests.test_phase4d_compare_only",
+    "tests.test_phase4d_compare_wrapper",
+    "tests.test_phase4d_policy_selection",
+    "tests.test_phase4d_stageA_repeat",
+    "tests.test_phase4d_stageA_runner",
+    "tests.test_phase4d_stageA_aggregate",
+    "tests.test_phase4d_authority_sensitivity_plan",
+    "tests.test_phase4d_runner_scripts",
+    "tests.test_phase4b_policy_eval_runner",
+    "tests.test_phase4_route_health_analyzer",
+    "tests.test_phase4c_horizon_sweep_summary",
+    "tests.test_phase4c_horizon_sweep_runner",
     "tests.test_phase4_runner_help",
     "tests.test_rl_residual_controller",
     "tests.test_rl_observations",
@@ -100,6 +161,7 @@ modules = (
     "tests.test_rl_carla_env",
     "tests.test_zero_residual_equivalence",
     "tests.test_phase2_acceptance",
+    "tests.test_profile_metric_source",
 )
 
 count = 0

@@ -85,6 +85,98 @@ PHASE4_EVAL_FIELDS: Tuple[str, ...] = (
 )
 
 
+PHASE4B_REFERENCE_SCENARIO = "S8_rl_zero_residual_skyhook"
+PHASE4B_LEARNED_SCENARIO = "S4_rl_residual_skyhook"
+
+PHASE4B_POLICY_FALLBACK_REASONS: Tuple[str, ...] = (
+    "policy_unavailable",
+    "missing_path",
+    "missing_file",
+    "policy_file_missing",
+    "policy_predict_failed",
+    "invalid_observation",
+    "invalid_policy_action",
+)
+
+PHASE4B_ALLOWED_FALLBACK_REASONS: Tuple[str, ...] = (
+    "safety_gate_zero",
+)
+
+PHASE4B_POLICY_EVAL_FIELDS: Tuple[str, ...] = (
+    "scenario",
+    "phase4b_role",
+    "phase4b_status",
+    "failed_checks",
+    "warnings",
+    "route_score_ok",
+    "score_composed_ok",
+    "infraction_ok",
+    "verification_ok",
+    "policy_available_ok",
+    "no_policy_fallback_ok",
+    "allowed_fallback_only_ok",
+    "action_nonzero_ok",
+    "residual_nonzero_ok",
+    "effective_control_ok",
+    "hard_safety_ok",
+    "fallback_ratio_ok",
+    "low_speed_mask_ok",
+    "observation_clip_ok",
+    "reward_present_ok",
+    "route_completion_ok",
+    "score_route",
+    "score_composed",
+    "score_penalty",
+    "sidecar_command_verifies",
+    "rl_policy_available_ratio",
+    "rl_fallback_rows",
+    "rl_fallback_reasons",
+    "rl_mean_abs_action",
+    "rl_mean_abs_residual_damper",
+    "effective_control_ratio",
+    "hard_safety_gate_ratio",
+    "fallback_ratio",
+    "low_speed_mask_ratio",
+    "observation_clip_ratio",
+    "reward_rows",
+    "reward_row_ratio",
+    "diagnostic_rows",
+    "route_completion_proxy",
+    "route_progress_monotonic_fraction_max",
+    "warmup_excluded_comfort_delta_vs_S8",
+    "warmup_excluded_peak_roll_delta_vs_S8",
+    "mean_reward_total_delta_vs_S8",
+    "mean_abs_action_delta_vs_S8",
+    "mean_abs_residual_delta_vs_S8",
+    "score_route_delta_vs_S8",
+    "score_composed_delta_vs_S8",
+    "phase3b_status",
+)
+
+PHASE4B_INFRACTION_FIELDS: Tuple[str, ...] = (
+    "collision_count",
+    "lane_invasion_count",
+    "red_light_count",
+    "blocked_vehicle_count",
+    "route_timeout_count",
+    "stop_infraction_count",
+    "stop_sign_count",
+    "stop_count",
+    "outside_lane_count",
+    "collisions_layout",
+    "collisions_pedestrian",
+    "collisions_vehicle",
+    "red_light",
+    "stop_infraction",
+    "outside_route_lanes",
+    "route_dev",
+    "vehicle_blocked",
+    "scenario_timeouts",
+    "min_speed_infractions",
+    "yield_emergency_vehicle_infractions",
+)
+
+
 def write_phase4_training_canary(
     output_dir: str,
     *,
@@ -281,6 +373,82 @@ def write_phase4_eval_acceptance_report(
     return csv_path, json_path, rows
 
 
+def write_phase4b_policy_eval_acceptance_report(
+    output_dir: str,
+    *,
+    suite_summary_path: str = "",
+    learned_scenario: str = PHASE4B_LEARNED_SCENARIO,
+    reference_scenario: str = PHASE4B_REFERENCE_SCENARIO,
+) -> Tuple[str, str, List[Dict[str, Any]]]:
+    """Write Phase 4-B exported policy route-suite acceptance CSV/JSON."""
+
+    output_dir = _abs_path(output_dir)
+    summary_path = _resolve_path(
+        suite_summary_path or os.path.join(output_dir, "suite_summary.csv"),
+        output_dir)
+    summary_rows = _read_csv_rows(summary_path)
+    rows = phase4b_policy_eval_acceptance_rows(
+        summary_rows,
+        learned_scenario=learned_scenario,
+        reference_scenario=reference_scenario)
+    csv_path = os.path.join(output_dir, "phase4b_policy_eval_acceptance.csv")
+    json_path = os.path.join(output_dir, "phase4b_policy_eval_acceptance.json")
+    _write_csv_rows(csv_path, rows, PHASE4B_POLICY_EVAL_FIELDS)
+    _write_json(json_path, rows)
+    return csv_path, json_path, rows
+
+
+def phase4b_policy_eval_acceptance_rows(
+    summary_rows: Sequence[Mapping[str, Any]],
+    *,
+    learned_scenario: str = PHASE4B_LEARNED_SCENARIO,
+    reference_scenario: str = PHASE4B_REFERENCE_SCENARIO,
+) -> List[Dict[str, Any]]:
+    """Build Phase 4-B acceptance rows for reference S8 and learned S4."""
+
+    by_scenario = {
+        _nonempty(row.get("scenario", row.get("name"))): row
+        for row in summary_rows
+        if _nonempty(row.get("scenario", row.get("name")))
+    }
+    reference = by_scenario.get(reference_scenario)
+    learned = by_scenario.get(learned_scenario)
+    rows: List[Dict[str, Any]] = []
+
+    if reference is None:
+        rows.append(_phase4b_missing_row(
+            reference_scenario,
+            role="reference",
+            status="warn",
+            warnings=("reference_missing",)))
+    else:
+        rows.append(_phase4b_reference_row(reference))
+
+    reference_bad = (
+        reference is not None and
+        any(item for item in rows[0]["failed_checks"].split(";") if item))
+    learned_warnings: List[str] = []
+    if reference is None:
+        learned_warnings.append("reference_missing")
+    elif reference_bad:
+        learned_warnings.append("reference_route_health_bad")
+
+    if learned is None:
+        rows.append(_phase4b_missing_row(
+            learned_scenario,
+            role="learned",
+            status="fail",
+            failed=("learned_scenario_missing",),
+            warnings=tuple(learned_warnings)))
+    else:
+        rows.append(_phase4b_learned_row(
+            learned,
+            reference=reference,
+            extra_warnings=learned_warnings))
+
+    return rows
+
+
 def phase4_eval_acceptance_rows(
     summary_rows: Sequence[Mapping[str, Any]],
 ) -> List[Dict[str, Any]]:
@@ -369,6 +537,13 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--training-config", default="")
     parser.add_argument("--eval-output-dir", default="")
     parser.add_argument("--suite-summary", default="")
+    parser.add_argument("--phase4b-output-dir", default="")
+    parser.add_argument(
+        "--phase4b-learned-scenario",
+        default=PHASE4B_LEARNED_SCENARIO)
+    parser.add_argument(
+        "--phase4b-reference-scenario",
+        default=PHASE4B_REFERENCE_SCENARIO)
     return parser
 
 
@@ -391,6 +566,16 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         print("phase4 eval acceptance: %s" % csv_path)
         print("phase4 eval rows: %d" % len(rows))
         print("phase4 eval json: %s" % json_path)
+        wrote_any = True
+    if args.phase4b_output_dir:
+        csv_path, json_path, rows = write_phase4b_policy_eval_acceptance_report(
+            args.phase4b_output_dir,
+            suite_summary_path=args.suite_summary,
+            learned_scenario=args.phase4b_learned_scenario,
+            reference_scenario=args.phase4b_reference_scenario)
+        print("phase4b policy eval acceptance: %s" % csv_path)
+        print("phase4b policy eval rows: %d" % len(rows))
+        print("phase4b policy eval json: %s" % json_path)
         wrote_any = True
     if not wrote_any:
         build_arg_parser().print_help()
@@ -443,6 +628,310 @@ def _phase4_training_checks(
     if row.get("route_progress_available_ratio", "") == "":
         warnings.append("route_progress_available_ratio_missing")
     return failed, warnings
+
+
+def _phase4b_reference_row(source: Mapping[str, Any]) -> Dict[str, Any]:
+    failed: List[str] = []
+    warnings: List[str] = []
+    route_score_ok = _phase4b_route_score_ok(source)
+    if not route_score_ok:
+        failed.append("route_score")
+    composed_ok = _phase4b_composed_score_ok(source)
+    if not composed_ok:
+        failed.append("score_composed")
+    infraction_ok = int(_infractions_zero(source))
+    if not infraction_ok:
+        failed.append("infractions")
+    verification_ok = _phase4b_verification_ok(source)
+    if not verification_ok:
+        failed.append("verification")
+    phase3b_status = _nonempty(source.get("phase3b_status"))
+    if phase3b_status and phase3b_status not in ("pass", "warn"):
+        warnings.append("phase3b_status_%s" % phase3b_status)
+
+    row = _phase4b_common_row(source)
+    row.update({
+        "phase4b_role": "reference",
+        "phase4b_status": "pass" if not failed else "fail",
+        "failed_checks": ";".join(failed),
+        "warnings": ";".join(warnings),
+        "route_score_ok": int(route_score_ok),
+        "score_composed_ok": int(composed_ok),
+        "infraction_ok": infraction_ok,
+        "verification_ok": int(verification_ok),
+        "phase3b_status": phase3b_status,
+    })
+    return _ordered_row(row, PHASE4B_POLICY_EVAL_FIELDS)
+
+
+def _phase4b_learned_row(
+    source: Mapping[str, Any],
+    *,
+    reference: Optional[Mapping[str, Any]],
+    extra_warnings: Sequence[str],
+) -> Dict[str, Any]:
+    failed: List[str] = []
+    warnings: List[str] = list(extra_warnings)
+
+    checks = {
+        "route_score_ok": _phase4b_route_score_ok(source),
+        "score_composed_ok": _phase4b_composed_score_ok(source),
+        "infraction_ok": int(_infractions_zero(source)),
+        "verification_ok": _phase4b_verification_ok(source),
+        "policy_available_ok": _phase4b_policy_available_ok(source),
+        "no_policy_fallback_ok": _phase4b_no_policy_fallback_ok(source),
+        "allowed_fallback_only_ok": _phase4b_allowed_fallback_only_ok(source),
+        "action_nonzero_ok": _phase4b_action_nonzero_ok(source),
+        "residual_nonzero_ok": _phase4b_residual_nonzero_ok(source),
+        "effective_control_ok": _phase4b_effective_control_ok(source),
+        "hard_safety_ok": _phase4b_hard_safety_ok(source),
+        "fallback_ratio_ok": _phase4b_ratio_at_most(source, ("fallback_ratio",), 0.45),
+        "low_speed_mask_ok": _phase4b_ratio_at_most(
+            source,
+            ("low_speed_mask_ratio",),
+            0.45),
+        "observation_clip_ok": _phase4b_ratio_at_most(
+            source,
+            ("observation_clip_ratio",),
+            0.05),
+        "reward_present_ok": _phase4b_reward_present_ok(source),
+        "route_completion_ok": _phase4b_route_completion_ok(source),
+    }
+    failed.extend(
+        key[:-3]
+        for key, ok in checks.items()
+        if not ok and key.endswith("_ok"))
+    phase3b_status = _nonempty(source.get("phase3b_status"))
+    if phase3b_status and phase3b_status not in ("pass", "warn"):
+        warnings.append("phase3b_status_%s" % phase3b_status)
+
+    row = _phase4b_common_row(source)
+    row.update({
+        "phase4b_role": "learned",
+        "phase4b_status": "pass" if not failed else "fail",
+        "failed_checks": ";".join(failed),
+        "warnings": ";".join(warnings),
+        "phase3b_status": phase3b_status,
+    })
+    for key, ok in checks.items():
+        row[key] = int(ok)
+    if reference is not None:
+        row.update(_phase4b_reference_deltas(source, reference))
+    return _ordered_row(row, PHASE4B_POLICY_EVAL_FIELDS)
+
+
+def _phase4b_missing_row(
+    scenario: str,
+    *,
+    role: str,
+    status: str,
+    failed: Sequence[str] = (),
+    warnings: Sequence[str] = (),
+) -> Dict[str, Any]:
+    return _ordered_row({
+        "scenario": scenario,
+        "phase4b_role": role,
+        "phase4b_status": status,
+        "failed_checks": ";".join(failed),
+        "warnings": ";".join(warnings),
+    }, PHASE4B_POLICY_EVAL_FIELDS)
+
+
+def _phase4b_common_row(source: Mapping[str, Any]) -> Dict[str, Any]:
+    policy_ratio = _phase4b_float_first(
+        source,
+        ("rl_policy_available_ratio", "policy_available_ratio"))
+    action = _phase4b_float_first(
+        source,
+        ("rl_mean_abs_action", "mean_abs_action"))
+    residual = _phase4b_float_first(
+        source,
+        ("rl_mean_abs_residual_damper", "mean_abs_residual_damper"))
+    return {
+        "scenario": source.get("scenario", source.get("name", "")),
+        "score_route": source.get("score_route", ""),
+        "score_composed": source.get("score_composed", ""),
+        "score_penalty": source.get("score_penalty", ""),
+        "sidecar_command_verifies": source.get("sidecar_command_verifies", ""),
+        "rl_policy_available_ratio": policy_ratio if policy_ratio is not None else "",
+        "rl_fallback_rows": source.get("rl_fallback_rows", ""),
+        "rl_fallback_reasons": source.get("rl_fallback_reasons", ""),
+        "rl_mean_abs_action": action if action is not None else "",
+        "rl_mean_abs_residual_damper": residual if residual is not None else "",
+        "effective_control_ratio": source.get("effective_control_ratio", ""),
+        "hard_safety_gate_ratio": source.get("hard_safety_gate_ratio", ""),
+        "fallback_ratio": source.get("fallback_ratio", ""),
+        "low_speed_mask_ratio": source.get("low_speed_mask_ratio", ""),
+        "observation_clip_ratio": source.get("observation_clip_ratio", ""),
+        "reward_rows": source.get("reward_rows", ""),
+        "reward_row_ratio": source.get("reward_row_ratio", ""),
+        "diagnostic_rows": source.get("diagnostic_rows", ""),
+        "route_completion_proxy": source.get("route_completion_proxy", ""),
+        "route_progress_monotonic_fraction_max": source.get(
+            "route_progress_monotonic_fraction_max",
+            ""),
+    }
+
+
+def _phase4b_reference_deltas(
+    source: Mapping[str, Any],
+    reference: Mapping[str, Any],
+) -> Dict[str, Any]:
+    return {
+        "warmup_excluded_comfort_delta_vs_S8": _delta_first(
+            source,
+            reference,
+            ("warmup_excluded_comfort_comfort_score",)),
+        "warmup_excluded_peak_roll_delta_vs_S8": _delta_first(
+            source,
+            reference,
+            ("warmup_excluded_stability_peak_abs_roll",
+             "stability_peak_abs_roll")),
+        "mean_reward_total_delta_vs_S8": _delta_first(
+            source,
+            reference,
+            ("mean_reward_total",)),
+        "mean_abs_action_delta_vs_S8": _delta_first(
+            source,
+            reference,
+            ("mean_abs_action", "rl_mean_abs_action")),
+        "mean_abs_residual_delta_vs_S8": _delta_first(
+            source,
+            reference,
+            ("mean_abs_residual_damper", "rl_mean_abs_residual_damper")),
+        "score_route_delta_vs_S8": _delta_first(
+            source,
+            reference,
+            ("score_route",)),
+        "score_composed_delta_vs_S8": _delta_first(
+            source,
+            reference,
+            ("score_composed",)),
+    }
+
+
+def _phase4b_route_score_ok(source: Mapping[str, Any]) -> int:
+    score = _float_value(source.get("score_route"))
+    return int(score is not None and abs(score - 100.0) <= 1.0e-6)
+
+
+def _phase4b_composed_score_ok(source: Mapping[str, Any]) -> int:
+    score = _float_value(source.get("score_composed"))
+    return int(score is not None and abs(score - 100.0) <= 1.0e-6)
+
+
+def _phase4b_verification_ok(source: Mapping[str, Any]) -> int:
+    return int((_float_value(source.get("sidecar_command_verifies")) or 0.0) > 0.0)
+
+
+def _phase4b_policy_available_ok(source: Mapping[str, Any]) -> int:
+    ratio = _phase4b_float_first(
+        source,
+        ("rl_policy_available_ratio", "policy_available_ratio"))
+    return int(ratio is not None and ratio >= 0.99)
+
+
+def _phase4b_no_policy_fallback_ok(source: Mapping[str, Any]) -> int:
+    fallback_text = ";".join((
+        _nonempty(source.get("rl_fallback_reasons")),
+        _nonempty(source.get("policy_error")),
+        _nonempty(source.get("rl_policy_error")),
+    ))
+    return int(not any(reason in fallback_text for reason in PHASE4B_POLICY_FALLBACK_REASONS))
+
+
+def _phase4b_allowed_fallback_only_ok(source: Mapping[str, Any]) -> int:
+    reasons = _phase4b_reason_set(source.get("rl_fallback_reasons"))
+    return int(all(reason in PHASE4B_ALLOWED_FALLBACK_REASONS for reason in reasons))
+
+
+def _phase4b_action_nonzero_ok(source: Mapping[str, Any]) -> int:
+    action = _phase4b_float_first(
+        source,
+        ("rl_mean_abs_action", "mean_abs_action"))
+    return int(action is not None and action > 1.0e-3)
+
+
+def _phase4b_residual_nonzero_ok(source: Mapping[str, Any]) -> int:
+    residual = _phase4b_float_first(
+        source,
+        ("rl_mean_abs_residual_damper", "mean_abs_residual_damper"))
+    return int(residual is not None and residual > 1.0e-5)
+
+
+def _phase4b_effective_control_ok(source: Mapping[str, Any]) -> int:
+    ratio = _phase4b_float_first(source, ("effective_control_ratio",))
+    return int(ratio is not None and ratio >= 0.50)
+
+
+def _phase4b_hard_safety_ok(source: Mapping[str, Any]) -> int:
+    ratio = _phase4b_float_first(source, ("hard_safety_gate_ratio",))
+    return int(ratio is not None and abs(ratio) <= 1.0e-12)
+
+
+def _phase4b_ratio_at_most(
+    source: Mapping[str, Any],
+    keys: Sequence[str],
+    threshold: float,
+) -> int:
+    ratio = _phase4b_float_first(source, keys)
+    return int(ratio is not None and ratio <= threshold)
+
+
+def _phase4b_reward_present_ok(source: Mapping[str, Any]) -> int:
+    ratio = _float_value(source.get("reward_row_ratio"))
+    if ratio is not None:
+        return int(ratio >= 0.95)
+    reward_rows = _float_value(source.get("reward_rows"))
+    diagnostic_rows = _float_value(source.get("diagnostic_rows"))
+    if reward_rows is not None and diagnostic_rows is not None and diagnostic_rows > 0.0:
+        return int(reward_rows / diagnostic_rows >= 0.95)
+    return int(reward_rows is not None and reward_rows > 0.0)
+
+
+def _phase4b_route_completion_ok(source: Mapping[str, Any]) -> int:
+    completion = _float_value(source.get("route_completion_proxy"))
+    if completion is not None and completion >= 1.0 - 1.0e-9:
+        return 1
+    progress = _float_value(source.get("route_progress_monotonic_fraction_max"))
+    return int(progress is not None and progress >= 0.98)
+
+
+def _phase4b_reason_set(value: Any) -> List[str]:
+    reasons: List[str] = []
+    for chunk in str(value or "").replace(",", ";").split(";"):
+        reason = chunk.strip()
+        if not reason:
+            continue
+        if "=" in reason:
+            reason = reason.split("=", 1)[0].strip()
+        if reason:
+            reasons.append(reason)
+    return reasons
+
+
+def _phase4b_float_first(
+    source: Mapping[str, Any],
+    keys: Sequence[str],
+) -> Optional[float]:
+    for key in keys:
+        value = _float_value(source.get(key))
+        if value is not None:
+            return value
+    return None
+
+
+def _delta_first(
+    source: Mapping[str, Any],
+    reference: Mapping[str, Any],
+    keys: Sequence[str],
+) -> Any:
+    for key in keys:
+        source_value = _float_value(source.get(key))
+        reference_value = _float_value(reference.get(key))
+        if source_value is not None and reference_value is not None:
+            return source_value - reference_value
+    return ""
 
 
 def _policy_adapter_load_ok(path: str, observation_dim: int) -> int:
@@ -634,24 +1123,35 @@ def _nonempty(value: Any) -> str:
 
 
 def _infractions_zero(row: Mapping[str, Any]) -> bool:
-    for key in (
-            "collision_count",
-            "lane_invasion_count",
-            "red_light_count",
-            "blocked_vehicle_count",
-            "route_timeout_count",
-            "collisions_layout",
-            "collisions_pedestrian",
-            "collisions_vehicle",
-            "red_light",
-            "outside_route_lanes"):
-        value = _float_value(row.get(key))
-        if value is not None and abs(value) > 1.0e-9:
-            return False
-    penalty = _float_value(row.get("score_penalty"))
-    if penalty is not None and abs(penalty) > 1.0e-9:
+    if not _nested_infractions_zero(row.get("infractions")):
         return False
+    for key in PHASE4B_INFRACTION_FIELDS:
+        if not _infraction_value_zero(row.get(key)):
+            return False
     return True
+
+
+def _nested_infractions_zero(value: Any) -> bool:
+    if isinstance(value, Mapping):
+        return all(_nested_infractions_zero(item) for item in value.values())
+    if isinstance(value, (list, tuple, set)):
+        return len(value) == 0
+    return _infraction_value_zero(value)
+
+
+def _infraction_value_zero(value: Any) -> bool:
+    if value in (None, "", [], {}):
+        return True
+    if isinstance(value, str) and value.strip() in ("", "[]", "{}", "0", "0.0"):
+        return True
+    if isinstance(value, Mapping):
+        return _nested_infractions_zero(value)
+    if isinstance(value, (list, tuple, set)):
+        return len(value) == 0
+    parsed = _float_value(value)
+    if parsed is not None:
+        return abs(parsed) <= 1.0e-9
+    return False
 
 
 def _first_existing(output_dir: str, names: Sequence[str]) -> str:

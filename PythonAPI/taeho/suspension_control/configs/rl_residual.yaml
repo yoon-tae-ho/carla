@@ -5,6 +5,11 @@ policy_path: ""
 normalizer_path: ""
 allow_untrained_policy: false
 deterministic_policy: true
+rl_residual_mode: learned_policy
+rl_action_scale: 1.0
+rl_residual_gain: 1.0
+scripted_residual_kind: ""
+scripted_residual_value: 0.0
 spring_frozen: true
 base_spring_scale: 1.0
 min_spring_scale: 0.95

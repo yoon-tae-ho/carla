@@ -183,3 +183,95 @@ def test_reward_row_ratio_uses_diagnostic_rows_denominator(tmp_path):
     assert summary["diagnostic_rows"] == 3
     assert summary["reward_rows"] == 2
     assert summary["reward_row_ratio"] == 2.0 / 3.0
+
+
+def test_summary_includes_authority_sensitivity_residual_fields(tmp_path):
+    fields = (
+        "rl_policy_available",
+        "rl_residual_mode",
+        "rl_action_scale",
+        "rl_residual_gain",
+        "rl_scripted_residual_kind",
+        "rl_mean_action",
+        "rl_mean_abs_action",
+        "rl_mean_raw_residual_damper",
+        "rl_mean_abs_raw_residual_damper",
+        "rl_mean_scaled_residual_damper",
+        "rl_mean_abs_scaled_residual_damper",
+        "rl_mean_scale_clipped_residual_damper",
+        "rl_mean_abs_scale_clipped_residual_damper",
+        "rl_mean_residual_damper",
+        "rl_mean_abs_residual_damper",
+        "rl_mean_final_residual_damper",
+        "rl_mean_abs_final_residual_damper",
+        "rl_residual_scale_clip",
+        "rl_damper_final_clamp",
+        "rl_residual_saturation",
+    )
+    rows = [
+        {
+            "rl_policy_available": 1,
+            "rl_residual_mode": "learned_policy",
+            "rl_action_scale": 5.0,
+            "rl_residual_gain": 5.0,
+            "rl_mean_action": 0.2,
+            "rl_mean_abs_action": 0.2,
+            "rl_mean_raw_residual_damper": 0.02,
+            "rl_mean_abs_raw_residual_damper": 0.02,
+            "rl_mean_scaled_residual_damper": 0.10,
+            "rl_mean_abs_scaled_residual_damper": 0.10,
+            "rl_mean_scale_clipped_residual_damper": 0.08,
+            "rl_mean_abs_scale_clipped_residual_damper": 0.08,
+            "rl_mean_residual_damper": 0.08,
+            "rl_mean_abs_residual_damper": 0.08,
+            "rl_mean_final_residual_damper": 0.08,
+            "rl_mean_abs_final_residual_damper": 0.08,
+            "rl_residual_scale_clip": 1,
+            "rl_damper_final_clamp": 0,
+            "rl_residual_saturation": 1,
+        },
+        {
+            "rl_policy_available": 1,
+            "rl_residual_mode": "scripted",
+            "rl_action_scale": 1.0,
+            "rl_residual_gain": 1.0,
+            "rl_scripted_residual_kind": "const_m0p05",
+            "rl_mean_action": 0.0,
+            "rl_mean_abs_action": 0.05,
+            "rl_mean_raw_residual_damper": -0.05,
+            "rl_mean_abs_raw_residual_damper": 0.05,
+            "rl_mean_scaled_residual_damper": -0.05,
+            "rl_mean_abs_scaled_residual_damper": 0.05,
+            "rl_mean_scale_clipped_residual_damper": -0.05,
+            "rl_mean_abs_scale_clipped_residual_damper": 0.05,
+            "rl_mean_residual_damper": -0.05,
+            "rl_mean_abs_residual_damper": 0.05,
+            "rl_mean_final_residual_damper": -0.05,
+            "rl_mean_abs_final_residual_damper": 0.05,
+            "rl_residual_scale_clip": 0,
+            "rl_damper_final_clamp": 1,
+            "rl_residual_saturation": 1,
+        },
+    ]
+    path = tmp_path / "controller_diagnostics.csv"
+    with open(path, "w") as csv_file:
+        csv_file.write(",".join(fields) + "\n")
+        for row in rows:
+            csv_file.write(",".join(str(row.get(field, "")) for field in fields) + "\n")
+
+    summary = summarize_diagnostics_csv(str(path))
+
+    assert summary["rl_residual_modes"] == "learned_policy;scripted"
+    assert summary["rl_scripted_residual_kinds"] == "const_m0p05"
+    assert summary["rl_action_scale_mean"] == 3.0
+    assert summary["rl_residual_gain_mean"] == 3.0
+    assert abs(summary["raw_mean_abs_action"] - 0.125) < 1e-12
+    assert abs(summary["raw_mean_abs_residual_damper"] - 0.035) < 1e-12
+    assert abs(summary["scaled_mean_abs_residual_damper"] - 0.075) < 1e-12
+    assert abs(summary["final_mean_abs_residual_damper"] - 0.065) < 1e-12
+    assert summary["residual_scale_clip_rows"] == 1
+    assert summary["residual_scale_clip_ratio"] == 0.5
+    assert summary["damper_final_clamp_rows"] == 1
+    assert summary["damper_final_clamp_ratio"] == 0.5
+    assert summary["residual_saturation_rows"] == 2
+    assert summary["residual_saturation_ratio"] == 1.0

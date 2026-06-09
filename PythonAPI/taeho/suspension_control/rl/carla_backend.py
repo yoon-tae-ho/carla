@@ -309,7 +309,7 @@ class LiveCarlaSuspensionBackend:
         self,
         host: str = "127.0.0.1",
         port: int = 2000,
-        timeout: float = 10.0,
+        timeout: float = 120.0,
         routes: str = "",
         routes_subset: str = "00",
         route_script: str = "",
@@ -328,9 +328,9 @@ class LiveCarlaSuspensionBackend:
         readback_tolerance: float = 1.0e-4,
         debug: int = 0,
         repetitions: int = 1,
-        connect_retry_seconds: float = 0.25,
-        hero_timeout_seconds: float = 300.0,
-        route_wait_timeout_seconds: float = 10.0,
+        connect_retry_seconds: float = 1.0,
+        hero_timeout_seconds: float = 900.0,
+        route_wait_timeout_seconds: float = 120.0,
         restore_native_on_close: bool = True,
         required_route_modules: Sequence[str] = ("srunner", "leaderboard"),
         carla_module: Any = None,
@@ -393,6 +393,7 @@ class LiveCarlaSuspensionBackend:
         self.world = None
         self.vehicle = None
         self.native_suspension = None
+        self._pending_native_suspension = None
         self.previous_state: Optional[VehicleState] = None
         self.current_state: Optional[VehicleState] = None
         self.current_planning: PlanningInfo = PlanningInfo.empty()
@@ -401,6 +402,7 @@ class LiveCarlaSuspensionBackend:
         self.route_progress_tracker: Optional[RouteProgressTracker] = None
         self.task_info_builder = TaskInfoBuilder()
         self.planning_info_provider = self._make_planning_provider()
+        self._reset_lifecycle_diagnostics()
         self.unavailable_message = self._dependency_unavailable_message()
         if self.unavailable_message:
             self.live_backend_available = False
@@ -449,13 +451,22 @@ class LiveCarlaSuspensionBackend:
         self.current_planning = PlanningInfo.empty()
         self.current_task_info = {}
         self.task_info_builder.reset(self._actor_key())
+        self._reset_lifecycle_diagnostics()
         self.route_progress_tracker = RouteProgressTracker(
             route_xml_path=self.routes,
             route_id=self.routes_subset)
+        self._connect_world()
+        self._restore_world_to_async()
         self.start_route_process(seed=self.seed, route_id=self.routes_subset)
         self._connect_world()
         self.vehicle = self.wait_for_hero()
-        self.native_suspension = self.vehicle.get_suspension_physics_control()
+        self._mark_hero_attached(self.vehicle)
+        self.native_suspension = self._pending_native_suspension
+        self._pending_native_suspension = None
+        if self.native_suspension is None:
+            self.native_suspension = self._call_suspension_api(
+                "get_suspension_physics_control",
+                self.vehicle.get_suspension_physics_control)
         validate_suspension_control(self.native_suspension)
         self.current_state = self.get_state()
         self.current_planning = self.get_planning()
@@ -511,7 +522,9 @@ class LiveCarlaSuspensionBackend:
 
     def get_current_suspension(self) -> Any:
         self._ensure_attached()
-        return self.vehicle.get_suspension_physics_control()
+        return self._call_suspension_api(
+            "get_suspension_physics_control",
+            self.vehicle.get_suspension_physics_control)
 
     def apply_suspension(
         self,
@@ -519,16 +532,25 @@ class LiveCarlaSuspensionBackend:
         verify: bool,
     ) -> Mapping[str, Any]:
         self._ensure_attached()
-        result = apply_suspension_command(
-            self.vehicle,
-            self.native_suspension,
-            command,
-            verify_readback=bool(verify),
-            readback_tolerance=self.readback_tolerance,
-            carla_module=self.carla)
+        self._ensure_actor_usable_for_suspension(
+            "apply_suspension_physics_control")
+        try:
+            result = apply_suspension_command(
+                self.vehicle,
+                self.native_suspension,
+                command,
+                verify_readback=bool(verify),
+                readback_tolerance=self.readback_tolerance,
+                carla_module=self.carla)
+        except Exception as error:
+            self._handle_suspension_api_error(
+                "apply_suspension_physics_control",
+                error)
         readback = result.get("readback")
         if readback is None:
-            readback = self.vehicle.get_suspension_physics_control()
+            readback = self._call_suspension_api(
+                "get_suspension_physics_control",
+                self.vehicle.get_suspension_physics_control)
         summary = result.get("readback_summary")
         if summary is None:
             summary = read_suspension_scale_summary(
@@ -567,6 +589,7 @@ class LiveCarlaSuspensionBackend:
         terminated = self.route_process is not None and not route_alive
         info = self.backend_info()
         if terminated:
+            self._record_route_finished_if_needed()
             info.update({
                 "route_process_returncode": route_returncode,
                 "route_result_available": int(os.path.isfile(self.route_result_path)),
@@ -586,8 +609,9 @@ class LiveCarlaSuspensionBackend:
                 self.vehicle is not None and
                 self.native_suspension is not None):
             try:
-                self.vehicle.apply_suspension_physics_control(
-                    self.native_suspension)
+                if self._hero_actor_usable():
+                    self.vehicle.apply_suspension_physics_control(
+                        self.native_suspension)
             except Exception:
                 pass
         if self.route_process is not None and self.route_process_alive():
@@ -599,6 +623,7 @@ class LiveCarlaSuspensionBackend:
                     self.route_process.kill()
                 except Exception:
                     pass
+        self._restore_world_to_async()
         if self._route_log_file is not None:
             try:
                 self._route_log_file.close()
@@ -665,9 +690,20 @@ class LiveCarlaSuspensionBackend:
         deadline = self._time() + self.hero_timeout_seconds
         last_wait_error = ""
         while self._time() <= deadline:
+            refresh_error = self._refresh_world_from_client()
+            if refresh_error:
+                last_wait_error = refresh_error
             vehicle = self._find_hero_vehicle()
             if vehicle is not None:
-                return vehicle
+                usable, reason = self._validate_hero_candidate_for_suspension(
+                    vehicle)
+                if usable:
+                    return vehicle
+                last_wait_error = reason
+            else:
+                snapshot = self._hero_wait_snapshot()
+                if snapshot:
+                    last_wait_error = snapshot
             if self.route_process is not None and not self.route_process_alive():
                 raise RuntimeError(
                     "route process exited before hero attach: returncode=%s" %
@@ -694,6 +730,8 @@ class LiveCarlaSuspensionBackend:
         return self.route_process.poll()
 
     def backend_info(self) -> Dict[str, Any]:
+        route_result = self._read_route_result()
+        route_summary = self._route_result_summary(route_result)
         return {
             "backend": "live",
             "real_backend_used": 1,
@@ -701,15 +739,290 @@ class LiveCarlaSuspensionBackend:
             "carla_connected": int(self.world is not None),
             "route_process_started": int(self.route_process is not None),
             "hero_attached": int(self.vehicle is not None),
+            "hero_actor_id": self.hero_actor_id,
+            "hero_actor_alive_last": int(self.hero_actor_alive_last),
+            "hero_destroy_detected": int(self.hero_destroy_detected),
+            "hero_destroy_detected_step": self.hero_destroy_detected_step,
+            "hero_destroy_detected_wall_time": self.hero_destroy_detected_wall_time,
             "route_process_alive": int(self.route_process_alive()),
             "route_process_pid": getattr(self.route_process, "pid", ""),
             "route_process_returncode": self.route_process_returncode(),
+            "route_record_status": route_summary.get("route_record_status", ""),
+            "route_record_score_route": route_summary.get("route_record_score_route", ""),
+            "route_record_score_composed": route_summary.get("route_record_score_composed", ""),
+            "route_record_duration_game": route_summary.get("route_record_duration_game", ""),
+            "route_checkpoint_progress": route_summary.get("route_checkpoint_progress", ""),
+            "route_entry_status": route_summary.get("route_entry_status", ""),
+            "route_finished_detected": int(self.route_finished_detected),
+            "route_finished_detected_step": self.route_finished_detected_step,
+            "route_finished_detected_wall_time": self.route_finished_detected_wall_time,
+            "terminal_reason": self.terminal_reason,
+            "episode_end_reason": self.episode_end_reason,
+            "stale_actor_api_call_count": int(self.stale_actor_api_call_count),
+            "actor_not_found_error_count": int(self.actor_not_found_error_count),
+            "last_suspension_api_call_step": self.last_suspension_api_call_step,
+            "last_suspension_api_call_actor_id": self.last_suspension_api_call_actor_id,
+            "last_suspension_api_name": self.last_suspension_api_name,
+            "last_suspension_api_error": self.last_suspension_api_error,
             "route_script": self.route_script,
             "route_output_dir": self.route_output_dir,
             "route_stdout_log": self.route_stdout_log,
             "route_result_path": self.route_result_path,
             "route_debug_result_path": self.route_debug_result_path,
         }
+
+    def lifecycle_summary(self) -> Dict[str, Any]:
+        return self.backend_info()
+
+    def _reset_lifecycle_diagnostics(self) -> None:
+        self.hero_actor_id = ""
+        self.hero_actor_alive_last = 0
+        self.hero_destroy_detected = 0
+        self.hero_destroy_detected_step = ""
+        self.hero_destroy_detected_wall_time = ""
+        self.stale_actor_api_call_count = 0
+        self.actor_not_found_error_count = 0
+        self.last_suspension_api_call_step = ""
+        self.last_suspension_api_call_actor_id = ""
+        self.last_suspension_api_name = ""
+        self.last_suspension_api_error = ""
+        self.terminal_reason = ""
+        self.episode_end_reason = ""
+        self.route_finished_detected = 0
+        self.route_finished_detected_step = ""
+        self.route_finished_detected_wall_time = ""
+        self._pending_native_suspension = None
+
+    def _mark_hero_attached(self, vehicle: Any) -> None:
+        self.hero_actor_id = self._actor_id_value(vehicle)
+        self.hero_actor_alive_last = 1
+
+    def _call_suspension_api(self, api_name: str, fn: Callable[[], Any]) -> Any:
+        self._ensure_actor_usable_for_suspension(api_name)
+        try:
+            return fn()
+        except Exception as error:
+            self._handle_suspension_api_error(api_name, error)
+
+    def _ensure_actor_usable_for_suspension(self, api_name: str) -> None:
+        self._record_route_finished_if_needed()
+        self.last_suspension_api_call_step = self.step_index
+        self.last_suspension_api_call_actor_id = (
+            self.hero_actor_id or self._actor_id_value(self.vehicle))
+        self.last_suspension_api_name = api_name
+        if self._hero_actor_usable():
+            self.hero_actor_alive_last = 1
+            return
+        self.stale_actor_api_call_count += 1
+        self._mark_hero_destroyed()
+        self.last_suspension_api_error = (
+            "hero actor unavailable before %s" % api_name)
+        raise RuntimeError(self._lifecycle_error_message(
+            api_name,
+            raw_error=self.last_suspension_api_error))
+
+    def _handle_suspension_api_error(
+        self,
+        api_name: str,
+        error: Exception,
+    ) -> None:
+        if not self._is_actor_not_found_error(error):
+            raise error
+        self.actor_not_found_error_count += 1
+        self.stale_actor_api_call_count += 1
+        self.last_suspension_api_error = str(error)
+        self._mark_hero_destroyed()
+        raise RuntimeError(self._lifecycle_error_message(
+            api_name,
+            raw_error=str(error))) from error
+
+    def _hero_actor_usable(self) -> bool:
+        vehicle = self.vehicle
+        usable, _ = self._hero_candidate_basic_usable(vehicle)
+        return usable
+
+    def _hero_candidate_basic_usable(self, vehicle: Any) -> Tuple[bool, str]:
+        if vehicle is None:
+            return False, "candidate is empty"
+        is_alive = getattr(vehicle, "is_alive", None)
+        if is_alive is not None:
+            try:
+                if callable(is_alive):
+                    is_alive = is_alive()
+                if not bool(is_alive):
+                    return False, "candidate is_alive is false"
+            except Exception:
+                return False, "candidate is_alive check failed"
+        actor_id = self._actor_id_value(vehicle)
+        if actor_id and self.world is not None:
+            try:
+                if self._find_actor_by_id(actor_id) is None:
+                    return False, "candidate actor_id=%s is not in registry" % actor_id
+            except Exception:
+                return False, "candidate registry check failed"
+        return True, ""
+
+    def _validate_hero_candidate_for_suspension(
+        self,
+        vehicle: Any,
+    ) -> Tuple[bool, str]:
+        usable, reason = self._hero_candidate_basic_usable(vehicle)
+        if not usable:
+            return False, reason
+        try:
+            native_suspension = vehicle.get_suspension_physics_control()
+            validate_suspension_control(native_suspension)
+        except Exception as error:
+            return False, str(error)
+        self._pending_native_suspension = native_suspension
+        return True, ""
+
+    def _find_actor_by_id(self, actor_id: str) -> Any:
+        if self.world is None:
+            return None
+        actors = self.world.get_actors()
+        vehicles = actors.filter("vehicle.*") if hasattr(actors, "filter") else actors
+        for actor in vehicles:
+            if str(getattr(actor, "id", "")) == str(actor_id):
+                return actor
+        return None
+
+    def _actor_id_value(self, vehicle: Any = None) -> str:
+        vehicle = self.vehicle if vehicle is None else vehicle
+        value = getattr(vehicle, "id", "") if vehicle is not None else ""
+        return str(value or "")
+
+    def _mark_hero_destroyed(self) -> None:
+        self.hero_actor_alive_last = 0
+        if not self.hero_destroy_detected:
+            self.hero_destroy_detected = 1
+            self.hero_destroy_detected_step = self.step_index
+            self.hero_destroy_detected_wall_time = self._time()
+        self._record_route_finished_if_needed()
+        route_terminal = bool(self.route_finished_detected)
+        if route_terminal:
+            self.terminal_reason = "route_finished_or_hero_destroyed"
+            self.episode_end_reason = "hero_destroyed_after_route_terminal"
+        else:
+            route_result = self._read_route_result()
+            if self._route_result_available_but_not_terminal(route_result):
+                reason = "hero_actor_unavailable_before_route_ready"
+            else:
+                reason = "hero_actor_unavailable"
+            self.terminal_reason = self.terminal_reason or reason
+            self.episode_end_reason = self.episode_end_reason or reason
+
+    def _record_route_finished_if_needed(
+        self,
+        route_result: Optional[Mapping[str, Any]] = None,
+    ) -> None:
+        route_result = (
+            self._read_route_result()
+            if route_result is None else
+            route_result)
+        route_records = (
+            route_result.get("_checkpoint", {}).get("records", ())
+            if isinstance(route_result, Mapping) else ())
+        route_progress_complete = self._route_result_progress_complete(route_result)
+        route_done = (
+            self.route_process is not None and
+            not self.route_process_alive())
+        if route_records or route_progress_complete:
+            route_done = True
+        if not route_done:
+            return
+        if not self.route_finished_detected:
+            self.route_finished_detected = 1
+            self.route_finished_detected_step = self.step_index
+            self.route_finished_detected_wall_time = self._time()
+        if not self.terminal_reason:
+            self.terminal_reason = "route_process_finished"
+        if not self.episode_end_reason:
+            self.episode_end_reason = "route_process_finished"
+
+    @staticmethod
+    def _route_result_progress_complete(route_result: Any) -> bool:
+        if not isinstance(route_result, Mapping):
+            return False
+        checkpoint = route_result.get("_checkpoint", {})
+        if not isinstance(checkpoint, Mapping):
+            return False
+        progress = checkpoint.get("progress", ())
+        if not isinstance(progress, (list, tuple)) or len(progress) != 2:
+            return False
+        try:
+            current = float(progress[0])
+            total = float(progress[1])
+        except (TypeError, ValueError):
+            return False
+        return total > 0.0 and current >= total
+
+    def _route_result_available_but_not_terminal(self, route_result: Any) -> bool:
+        if not isinstance(route_result, Mapping):
+            return False
+        checkpoint = route_result.get("_checkpoint", {})
+        records = (
+            checkpoint.get("records", ())
+            if isinstance(checkpoint, Mapping) else ())
+        return (
+            not records and
+            not self._route_result_progress_complete(route_result) and
+            self.route_process_alive())
+
+    def _route_result_summary(
+        self,
+        route_result: Mapping[str, Any],
+    ) -> Dict[str, Any]:
+        if not isinstance(route_result, Mapping):
+            return {}
+        checkpoint = route_result.get("_checkpoint", {})
+        if not isinstance(checkpoint, Mapping):
+            checkpoint = {}
+        records = checkpoint.get("records", ()) or ()
+        record = records[-1] if records else {}
+        scores = record.get("scores", {}) if isinstance(record, Mapping) else {}
+        meta = record.get("meta", {}) if isinstance(record, Mapping) else {}
+        progress = checkpoint.get("progress", "")
+        if isinstance(progress, (list, tuple)) and len(progress) == 2:
+            progress = "%s/%s" % (progress[0], progress[1])
+        return {
+            "route_record_status": record.get("status", "") if record else "",
+            "route_record_score_route": scores.get("score_route", ""),
+            "route_record_score_composed": scores.get("score_composed", ""),
+            "route_record_duration_game": meta.get("duration_game", ""),
+            "route_checkpoint_progress": progress,
+            "route_entry_status": route_result.get("entry_status", ""),
+        }
+
+    def _lifecycle_error_message(self, api_name: str, raw_error: str) -> str:
+        route_summary = self._route_result_summary(self._read_route_result())
+        return (
+            "live route backend suspension API unavailable: "
+            "api=%s terminal_reason=%s episode_end_reason=%s "
+            "hero_actor_id=%s step=%s route_process_returncode=%s "
+            "route_result_available=%s route_record_status=%s "
+            "route_record_score_route=%s route_checkpoint_progress=%s "
+            "raw_error=%s" %
+            (
+                api_name,
+                self.terminal_reason,
+                self.episode_end_reason,
+                self.hero_actor_id,
+                self.step_index,
+                self.route_process_returncode(),
+                int(os.path.isfile(self.route_result_path)),
+                route_summary.get("route_record_status", ""),
+                route_summary.get("route_record_score_route", ""),
+                route_summary.get("route_checkpoint_progress", ""),
+                raw_error,
+            ))
+
+    @staticmethod
+    def _is_actor_not_found_error(error: Exception) -> bool:
+        message = str(error)
+        return (
+            "Actor could not be found in the registry" in message or
+            ("Actor" in message and "could not be found" in message))
 
     def _dependency_unavailable_message(self) -> str:
         errors = []
@@ -745,6 +1058,44 @@ class LiveCarlaSuspensionBackend:
         self.client.set_timeout(self.timeout)
         self.world = self.client.get_world()
 
+    def _refresh_world_from_client(self) -> str:
+        if self.client is None:
+            return ""
+        try:
+            world = self.client.get_world()
+        except Exception as error:
+            return "world refresh failed: %s" % error
+        if world is not None:
+            self.world = world
+        return ""
+
+    def _restore_world_to_async(self) -> None:
+        world = self.world
+        if self.client is not None:
+            try:
+                world = self.client.get_world()
+                self.world = world
+            except Exception:
+                pass
+        if world is None:
+            return
+        if not hasattr(world, "get_settings") or not hasattr(world, "apply_settings"):
+            return
+        try:
+            settings = world.get_settings()
+            needs_restore = bool(getattr(settings, "synchronous_mode", False))
+            if getattr(settings, "fixed_delta_seconds", None) is not None:
+                needs_restore = True
+            if not needs_restore:
+                return
+            settings.synchronous_mode = False
+            settings.fixed_delta_seconds = None
+            world.apply_settings(settings)
+            if hasattr(world, "wait_for_tick"):
+                world.wait_for_tick(min(max(self.connect_retry_seconds, 1.0), 10.0))
+        except Exception:
+            pass
+
     def _find_hero_vehicle(self) -> Any:
         actors = self.world.get_actors()
         vehicles = actors.filter("vehicle.*") if hasattr(actors, "filter") else actors
@@ -759,8 +1110,26 @@ class LiveCarlaSuspensionBackend:
                 continue
             if not hasattr(actor, "apply_suspension_physics_control"):
                 continue
-            return actor
+            usable, _ = self._hero_candidate_basic_usable(actor)
+            if usable:
+                return actor
         return None
+
+    def _hero_wait_snapshot(self) -> str:
+        if self.world is None:
+            return ""
+        try:
+            actors = self.world.get_actors()
+            vehicles = actors.filter("vehicle.*") if hasattr(actors, "filter") else actors
+        except Exception as error:
+            return "vehicle scan failed: %s" % error
+        rows = []
+        for actor in list(vehicles)[:8]:
+            rows.append("%s:%s:%s" % (
+                getattr(actor, "id", ""),
+                getattr(actor, "type_id", ""),
+                getattr(actor, "attributes", {}).get("role_name", "")))
+        return "visible_vehicles=%s roles=%s" % (len(vehicles), ",".join(rows))
 
     def _make_planning_provider(self) -> PlanningInfoProvider:
         provider = self.planning_provider.strip().lower()

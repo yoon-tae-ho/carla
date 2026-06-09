@@ -3,18 +3,33 @@
 from __future__ import annotations
 
 import math
-from typing import Sequence
+from typing import Optional, Sequence
 
 from .stability import _get, _values, mean, peak_abs, rms
 
 
-def _time_delta(left, right, default_dt: float) -> float:
-    elapsed_left = float(_get(left, "elapsed_seconds", 0.0))
-    elapsed_right = float(_get(right, "elapsed_seconds", 0.0))
-    dt = elapsed_right - elapsed_left
-    if dt <= 0.0:
-        return default_dt
-    return dt
+def _safe_float(value) -> Optional[float]:
+    try:
+        result = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(result):
+        return None
+    return result
+
+
+def _time_delta(left, right, default_dt: float) -> Optional[float]:
+    row_dt = _safe_float(_get(right, "dt", None))
+    if row_dt is not None:
+        return row_dt if row_dt > 0.0 else None
+
+    elapsed_left = _safe_float(_get(left, "elapsed_seconds", None))
+    elapsed_right = _safe_float(_get(right, "elapsed_seconds", None))
+    if elapsed_left is not None and elapsed_right is not None:
+        dt = elapsed_right - elapsed_left
+        return dt if dt > 0.0 else None
+
+    return default_dt if default_dt > 0.0 else None
 
 
 def jerk_series(profile: Sequence, axis: str = "az", default_dt: float = 0.05):
@@ -23,7 +38,11 @@ def jerk_series(profile: Sequence, axis: str = "az", default_dt: float = 0.05):
     jerks = []
     for left, right in zip(profile[:-1], profile[1:]):
         dt = _time_delta(left, right, default_dt)
-        jerks.append((float(_get(right, axis)) - float(_get(left, axis))) / dt)
+        left_value = _safe_float(_get(left, axis))
+        right_value = _safe_float(_get(right, axis))
+        if dt is None or left_value is None or right_value is None:
+            continue
+        jerks.append((right_value - left_value) / dt)
     return jerks
 
 

@@ -39,6 +39,8 @@ class ProjectionResult:
     command: SuspensionCommand
     sanitized_action: Tuple[float, ...]
     raw_residual_damper_per_wheel: Tuple[float, ...]
+    scaled_residual_damper_per_wheel: Tuple[float, ...]
+    scale_clipped_residual_damper_per_wheel: Tuple[float, ...]
     safety_scaled_residual_damper_per_wheel: Tuple[float, ...]
     rate_limited_residual_damper_per_wheel: Tuple[float, ...]
     final_residual_damper_per_wheel: Tuple[float, ...]
@@ -48,6 +50,9 @@ class ProjectionResult:
     safety_gate_active: int
     safety_gate_reason: str
     fallback_reason: str
+    action_scale: float
+    residual_mode: str
+    scripted_residual_kind: str
     diagnostics: Mapping[str, Any]
 
     @property
@@ -61,6 +66,14 @@ class ProjectionResult:
     @property
     def safety_scaled_residuals(self) -> Tuple[float, ...]:
         return self.safety_scaled_residual_damper_per_wheel
+
+    @property
+    def scaled_residuals(self) -> Tuple[float, ...]:
+        return self.scaled_residual_damper_per_wheel
+
+    @property
+    def scale_clipped_residuals(self) -> Tuple[float, ...]:
+        return self.scale_clipped_residual_damper_per_wheel
 
     @property
     def rate_limited_residuals(self) -> Tuple[float, ...]:
@@ -109,10 +122,16 @@ class ResidualActionProjector:
         action_invalid: bool = False,
         obs_diag: Optional[Mapping[str, Any]] = None,
         previous_final_dampers: Optional[Sequence[float]] = None,
+        action_scale: float = 1.0,
+        residual_mode: str = "learned_policy",
+        scripted_residual_kind: str = "",
+        scripted_residual_value: Any = "",
+        raw_residual_override: Optional[Sequence[float]] = None,
     ) -> ProjectionResult:
         cfg = self.config
         baseline = baseline_command.validate(expected_wheels=cfg.wheel_count)
         baseline_dampers = _damper_scales(baseline)
+        action_scale = _finite_nonnegative(action_scale, 1.0)
         if obs_diag is not None:
             observation_valid = bool(
                 dict(obs_diag).get("observation_valid", observation_valid))
@@ -126,23 +145,47 @@ class ResidualActionProjector:
             observation_valid=observation_valid,
             action_invalid=action_invalid)
 
-        raw_residuals = tuple(
-            value * max(0.0, cfg.max_damper_residual_scale)
-            for value in action_values)
+        if raw_residual_override is None:
+            raw_residuals = tuple(
+                value * max(0.0, cfg.max_damper_residual_scale)
+                for value in action_values)
+        else:
+            raw_residuals = _sanitize_residuals(
+                raw_residual_override,
+                cfg.wheel_count)
+        scaled_residuals = tuple(
+            float(residual) * action_scale
+            for residual in raw_residuals)
+        scale_clip_limit = max(0.0, cfg.max_damper_residual_scale)
+        scale_clipped_residuals = tuple(
+            clamp(residual, -scale_clip_limit, scale_clip_limit)
+            if scale_clip_limit > 0.0 else 0.0
+            for residual in scaled_residuals)
+        residual_scale_clip_active = int(any(
+            abs(float(raw) - float(clipped)) > 1.0e-12
+            for raw, clipped in zip(scaled_residuals, scale_clipped_residuals)))
         safety_scaled_residuals = tuple(
             residual * safety_gain
-            for residual in raw_residuals)
+            for residual in scale_clipped_residuals)
 
-        zero_action = all(abs(value) <= 1.0e-12 for value in action_values)
-        if zero_action:
+        zero_residual = all(
+            abs(value) <= 1.0e-12 for value in scale_clipped_residuals)
+        if zero_residual:
             result = self._exact_baseline_result(
                 baseline,
                 action_values,
                 raw_residuals,
+                scaled_residuals,
+                scale_clipped_residuals,
                 safety_scaled_residuals,
                 safety_gain,
                 safety_diag,
-                fallback_reason="")
+                fallback_reason="",
+                action_scale=action_scale,
+                residual_mode=residual_mode,
+                scripted_residual_kind=scripted_residual_kind,
+                scripted_residual_value=scripted_residual_value,
+                residual_scale_clip_active=residual_scale_clip_active)
             self.previous_damper_scales = result.final_damper_per_wheel
             return result
 
@@ -160,10 +203,17 @@ class ResidualActionProjector:
                 baseline,
                 action_values,
                 raw_residuals,
+                scaled_residuals,
+                scale_clipped_residuals,
                 safety_scaled_residuals,
                 safety_gain,
                 safety_diag,
-                fallback_reason=fallback_reason)
+                fallback_reason=fallback_reason,
+                action_scale=action_scale,
+                residual_mode=residual_mode,
+                scripted_residual_kind=scripted_residual_kind,
+                scripted_residual_value=scripted_residual_value,
+                residual_scale_clip_active=residual_scale_clip_active)
             self.previous_damper_scales = result.final_damper_per_wheel
             return result
 
@@ -179,6 +229,7 @@ class ResidualActionProjector:
         wheels = []
         rate_limited_residuals = []
         final_residuals = []
+        final_clamp_active = 0
         for index, (wheel, residual) in enumerate(
                 zip(baseline.wheels, safety_scaled_residuals)):
             desired = float(wheel.damper_scale) + float(residual)
@@ -189,10 +240,13 @@ class ResidualActionProjector:
                     previous[index] - max_delta,
                     previous[index] + max_delta)
             rate_limited_residuals.append(desired - wheel.damper_scale)
+            desired_after_rate_limit = desired
             damper = clamp(
                 desired,
                 cfg.min_damper_scale,
                 cfg.max_damper_scale)
+            if abs(damper - desired_after_rate_limit) > 1.0e-12:
+                final_clamp_active = 1
             if cfg.spring_frozen:
                 spring = cfg.base_spring_scale
             else:
@@ -209,6 +263,8 @@ class ResidualActionProjector:
             command,
             action_values,
             raw_residuals,
+            scaled_residuals,
+            scale_clipped_residuals,
             safety_scaled_residuals,
             tuple(rate_limited_residuals),
             tuple(final_residuals),
@@ -216,7 +272,13 @@ class ResidualActionProjector:
             final_dampers,
             safety_gain,
             safety_diag,
-            fallback_reason="")
+            fallback_reason="",
+            action_scale=action_scale,
+            residual_mode=residual_mode,
+            scripted_residual_kind=scripted_residual_kind,
+            scripted_residual_value=scripted_residual_value,
+            residual_scale_clip_active=residual_scale_clip_active,
+            final_clamp_active=final_clamp_active)
 
     def sanitize_action(
         self,
@@ -321,10 +383,17 @@ class ResidualActionProjector:
         baseline: SuspensionCommand,
         action_values: Tuple[float, ...],
         raw_residuals: Tuple[float, ...],
+        scaled_residuals: Tuple[float, ...],
+        scale_clipped_residuals: Tuple[float, ...],
         safety_scaled_residuals: Tuple[float, ...],
         safety_gain: float,
         safety_diag: Mapping[str, Any],
         fallback_reason: str,
+        action_scale: float,
+        residual_mode: str,
+        scripted_residual_kind: str,
+        scripted_residual_value: Any,
+        residual_scale_clip_active: int = 0,
     ) -> ProjectionResult:
         baseline_dampers = _damper_scales(baseline)
         zero_residuals = tuple(0.0 for _ in range(self.config.wheel_count))
@@ -332,6 +401,8 @@ class ResidualActionProjector:
             baseline,
             action_values,
             raw_residuals,
+            scaled_residuals,
+            scale_clipped_residuals,
             safety_scaled_residuals,
             zero_residuals,
             zero_residuals,
@@ -339,13 +410,21 @@ class ResidualActionProjector:
             baseline_dampers,
             safety_gain,
             safety_diag,
-            fallback_reason=fallback_reason)
+            fallback_reason=fallback_reason,
+            action_scale=action_scale,
+            residual_mode=residual_mode,
+            scripted_residual_kind=scripted_residual_kind,
+            scripted_residual_value=scripted_residual_value,
+            residual_scale_clip_active=residual_scale_clip_active,
+            final_clamp_active=0)
 
     def _result(
         self,
         command: SuspensionCommand,
         action_values: Tuple[float, ...],
         raw_residuals: Tuple[float, ...],
+        scaled_residuals: Tuple[float, ...],
+        scale_clipped_residuals: Tuple[float, ...],
         safety_scaled_residuals: Tuple[float, ...],
         rate_limited_residuals: Tuple[float, ...],
         final_residuals: Tuple[float, ...],
@@ -354,21 +433,49 @@ class ResidualActionProjector:
         safety_gain: float,
         safety_diag: Mapping[str, Any],
         fallback_reason: str,
+        action_scale: float,
+        residual_mode: str,
+        scripted_residual_kind: str,
+        scripted_residual_value: Any,
+        residual_scale_clip_active: int = 0,
+        final_clamp_active: int = 0,
     ) -> ProjectionResult:
         diagnostics = dict(_empty_safety_gate_diagnostics())
         diagnostics.update(dict(safety_diag or {}))
+        residual_saturation_active = int(
+            bool(residual_scale_clip_active) or bool(final_clamp_active))
         diagnostics.update({
+            "rl_residual_mode": residual_mode,
+            "rl_scripted_residual_kind": scripted_residual_kind,
+            "rl_scripted_residual_value": scripted_residual_value,
+            "rl_action_scale": action_scale,
+            "rl_residual_gain": action_scale,
             "rl_safety_gain": safety_gain,
             "rl_fallback_reason": fallback_reason,
             "rl_mean_action": _mean(action_values),
             "rl_mean_abs_action": _mean_abs(action_values),
+            "rl_mean_raw_residual_damper": _mean(raw_residuals),
+            "rl_mean_abs_raw_residual_damper": _mean_abs(raw_residuals),
+            "rl_mean_scaled_residual_damper": _mean(scaled_residuals),
+            "rl_mean_abs_scaled_residual_damper": _mean_abs(scaled_residuals),
+            "rl_mean_scale_clipped_residual_damper": _mean(scale_clipped_residuals),
+            "rl_mean_abs_scale_clipped_residual_damper": _mean_abs(scale_clipped_residuals),
             "rl_mean_residual_damper": _mean(final_residuals),
             "rl_mean_abs_residual_damper": _mean_abs(final_residuals),
+            "rl_mean_final_residual_damper": _mean(final_residuals),
+            "rl_mean_abs_final_residual_damper": _mean_abs(final_residuals),
+            "rl_residual_scale_clip": int(bool(residual_scale_clip_active)),
+            "rl_damper_final_clamp": int(bool(final_clamp_active)),
+            "rl_residual_saturation": residual_saturation_active,
         })
         for label, value in zip(WHEEL_LABELS, action_values):
             diagnostics["rl_action_%s" % label] = value
         for label, value in zip(WHEEL_LABELS, raw_residuals):
             diagnostics["rl_raw_residual_damper_%s" % label] = value
+        for label, value in zip(WHEEL_LABELS, scaled_residuals):
+            diagnostics["rl_scaled_residual_damper_%s" % label] = value
+        for label, value in zip(WHEEL_LABELS, scale_clipped_residuals):
+            diagnostics["rl_scale_clipped_residual_damper_%s" % label] = value
         for label, value in zip(WHEEL_LABELS, safety_scaled_residuals):
             diagnostics["rl_safety_scaled_residual_damper_%s" % label] = value
         for label, value in zip(WHEEL_LABELS, rate_limited_residuals):
@@ -384,6 +491,8 @@ class ResidualActionProjector:
             command=command,
             sanitized_action=action_values,
             raw_residual_damper_per_wheel=raw_residuals,
+            scaled_residual_damper_per_wheel=scaled_residuals,
+            scale_clipped_residual_damper_per_wheel=scale_clipped_residuals,
             safety_scaled_residual_damper_per_wheel=safety_scaled_residuals,
             rate_limited_residual_damper_per_wheel=rate_limited_residuals,
             final_residual_damper_per_wheel=final_residuals,
@@ -393,6 +502,9 @@ class ResidualActionProjector:
             safety_gate_active=int(diagnostics["rl_safety_gate_active"]),
             safety_gate_reason=str(diagnostics["rl_safety_gate_reason"]),
             fallback_reason=fallback_reason,
+            action_scale=action_scale,
+            residual_mode=residual_mode,
+            scripted_residual_kind=scripted_residual_kind,
             diagnostics=diagnostics)
 
 
@@ -413,6 +525,28 @@ def _match_length(
     while len(result) < count:
         result.append(fill)
     return tuple(result)
+
+
+def _sanitize_residuals(
+    values: Sequence[float],
+    count: int,
+) -> Tuple[float, ...]:
+    result = _match_length(values, count, 0.0)
+    sanitized = []
+    for value in result:
+        number = _finite_nonnegative(abs(value), 0.0)
+        sanitized.append(math.copysign(number, value))
+    return tuple(sanitized)
+
+
+def _finite_nonnegative(value: Any, default: float) -> float:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return default
+    if not math.isfinite(number) or number < 0.0:
+        return default
+    return number
 
 
 def _finite_value(value: Any) -> Tuple[float, bool]:

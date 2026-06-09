@@ -343,6 +343,11 @@ DIAGNOSTIC_FIELDS = (
     "planning_jsonl_rejected_messages",
     "planning_jsonl_read_errors",
     "rl_baseline",
+    "rl_residual_mode",
+    "rl_action_scale",
+    "rl_residual_gain",
+    "rl_scripted_residual_kind",
+    "rl_scripted_residual_value",
     "rl_policy_available",
     "rl_policy_status",
     "rl_policy_builtin_id",
@@ -367,6 +372,14 @@ DIAGNOSTIC_FIELDS = (
     "rl_raw_residual_damper_fr",
     "rl_raw_residual_damper_rl",
     "rl_raw_residual_damper_rr",
+    "rl_scaled_residual_damper_fl",
+    "rl_scaled_residual_damper_fr",
+    "rl_scaled_residual_damper_rl",
+    "rl_scaled_residual_damper_rr",
+    "rl_scale_clipped_residual_damper_fl",
+    "rl_scale_clipped_residual_damper_fr",
+    "rl_scale_clipped_residual_damper_rl",
+    "rl_scale_clipped_residual_damper_rr",
     "rl_safety_scaled_residual_damper_fl",
     "rl_safety_scaled_residual_damper_fr",
     "rl_safety_scaled_residual_damper_rl",
@@ -396,8 +409,19 @@ DIAGNOSTIC_FIELDS = (
     "rl_observation_clip_count",
     "rl_mean_action",
     "rl_mean_abs_action",
+    "rl_mean_raw_residual_damper",
+    "rl_mean_abs_raw_residual_damper",
+    "rl_mean_scaled_residual_damper",
+    "rl_mean_abs_scaled_residual_damper",
+    "rl_mean_scale_clipped_residual_damper",
+    "rl_mean_abs_scale_clipped_residual_damper",
     "rl_mean_residual_damper",
     "rl_mean_abs_residual_damper",
+    "rl_mean_final_residual_damper",
+    "rl_mean_abs_final_residual_damper",
+    "rl_residual_scale_clip",
+    "rl_damper_final_clamp",
+    "rl_residual_saturation",
     "reward_mode",
     "reward_baseline_command_source",
     "reward_total",
@@ -1370,6 +1394,11 @@ def run_env(
     env["ROUTES_SUBSET"] = args.routes_subset
     env["TRAFFIC_MANAGER_SEED"] = str(seed)
     env["TRAFFIC_MANAGER_PORT"] = str(args.traffic_manager_port)
+    try:
+        leaderboard_timeout = max(300.0, float(args.timeout))
+    except (TypeError, ValueError):
+        leaderboard_timeout = 300.0
+    env["LEADERBOARD_TIMEOUT"] = str(leaderboard_timeout)
     env["OUT_DIR"] = os.path.join(scenario_dir, "tfpp")
     if args.planning_provider == "jsonl" and args.planning_preview_jsonl:
         env["SUSPENSION_PLANNING_PREVIEW_JSONL"] = expand_path(
@@ -1537,10 +1566,28 @@ def summarize_diagnostics_csv(path: str) -> Dict[str, Any]:
         "rl_zero_residual_rows": 0,
         "rl_nonzero_residual_rows": 0,
         "rl_mean_safety_gain": "",
+        "rl_residual_modes": "",
+        "rl_action_scale_mean": "",
+        "rl_residual_gain_mean": "",
+        "rl_scripted_residual_kinds": "",
         "rl_mean_action": "",
         "rl_mean_abs_action": "",
+        "rl_mean_raw_residual_damper": "",
+        "rl_mean_abs_raw_residual_damper": "",
+        "rl_mean_scaled_residual_damper": "",
+        "rl_mean_abs_scaled_residual_damper": "",
+        "rl_mean_scale_clipped_residual_damper": "",
+        "rl_mean_abs_scale_clipped_residual_damper": "",
         "rl_mean_residual_damper": "",
         "rl_mean_abs_residual_damper": "",
+        "rl_mean_final_residual_damper": "",
+        "rl_mean_abs_final_residual_damper": "",
+        "residual_scale_clip_rows": 0,
+        "residual_scale_clip_ratio": "",
+        "damper_final_clamp_rows": 0,
+        "damper_final_clamp_ratio": "",
+        "residual_saturation_rows": 0,
+        "residual_saturation_ratio": "",
         "rl_observation_clip_count_max": "",
         "low_speed_mask_rows": 0,
         "low_speed_mask_ratio": "",
@@ -1577,6 +1624,10 @@ def summarize_diagnostics_csv(path: str) -> Dict[str, Any]:
         "fallback_ratio": "",
         "observation_clip_ratio": "",
         "mean_abs_action": "",
+        "raw_mean_abs_action": "",
+        "raw_mean_abs_residual_damper": "",
+        "scaled_mean_abs_residual_damper": "",
+        "final_mean_abs_residual_damper": "",
         "mean_abs_residual_damper": "",
         "mean_reward_total": "",
         "mean_reward_comfort": "",
@@ -1644,11 +1695,23 @@ def summarize_diagnostics_csv(path: str) -> Dict[str, Any]:
 
     fallback_reasons = set()
     planning_sources = set()
+    residual_modes = set()
+    scripted_residual_kinds = set()
+    action_scales: List[float] = []
+    residual_gains: List[float] = []
     safety_gains = []
     signed_actions = []
     abs_actions = []
+    signed_raw_residuals = []
+    abs_raw_residuals = []
+    signed_scaled_residuals = []
+    abs_scaled_residuals = []
+    signed_scale_clipped_residuals = []
+    abs_scale_clipped_residuals = []
     signed_residuals = []
     abs_residuals = []
+    signed_final_residuals = []
+    abs_final_residuals = []
     clip_counts = []
     gate_reason_counts: Dict[str, int] = {}
     gate_active_speeds: List[float] = []
@@ -1694,6 +1757,14 @@ def summarize_diagnostics_csv(path: str) -> Dict[str, Any]:
             has_rl = row.get("rl_policy_available", "") != ""
             if has_rl:
                 summary["rl_diagnostic_rows"] += 1
+            residual_mode = row.get("rl_residual_mode", "")
+            if residual_mode:
+                residual_modes.add(residual_mode)
+            scripted_kind = row.get("rl_scripted_residual_kind", "")
+            if scripted_kind:
+                scripted_residual_kinds.add(scripted_kind)
+            _append_float(action_scales, row.get("rl_action_scale"))
+            _append_float(residual_gains, row.get("rl_residual_gain"))
             policy_available = safe_float(row.get("rl_policy_available"))
             if policy_available is not None and policy_available > 0.0:
                 summary["rl_policy_available_rows"] += 1
@@ -1718,6 +1789,16 @@ def summarize_diagnostics_csv(path: str) -> Dict[str, Any]:
                     summary["rl_zero_action_rows"] += 1
                 else:
                     summary["rl_nonzero_action_rows"] += 1
+            _append_float(signed_raw_residuals, row.get("rl_mean_raw_residual_damper"))
+            _append_float(abs_raw_residuals, row.get("rl_mean_abs_raw_residual_damper"))
+            _append_float(signed_scaled_residuals, row.get("rl_mean_scaled_residual_damper"))
+            _append_float(abs_scaled_residuals, row.get("rl_mean_abs_scaled_residual_damper"))
+            _append_float(
+                signed_scale_clipped_residuals,
+                row.get("rl_mean_scale_clipped_residual_damper"))
+            _append_float(
+                abs_scale_clipped_residuals,
+                row.get("rl_mean_abs_scale_clipped_residual_damper"))
             _append_float(signed_residuals, row.get("rl_mean_residual_damper"))
             residual = safe_float(row.get("rl_mean_abs_residual_damper"))
             if residual is not None:
@@ -1726,6 +1807,14 @@ def summarize_diagnostics_csv(path: str) -> Dict[str, Any]:
                     summary["rl_zero_residual_rows"] += 1
                 else:
                     summary["rl_nonzero_residual_rows"] += 1
+            _append_float(signed_final_residuals, row.get("rl_mean_final_residual_damper"))
+            _append_float(abs_final_residuals, row.get("rl_mean_abs_final_residual_damper"))
+            if _positive_number(row.get("rl_residual_scale_clip")):
+                summary["residual_scale_clip_rows"] += 1
+            if _positive_number(row.get("rl_damper_final_clamp")):
+                summary["damper_final_clamp_rows"] += 1
+            if _positive_number(row.get("rl_residual_saturation")):
+                summary["residual_saturation_rows"] += 1
             _append_float(clip_counts, row.get("rl_observation_clip_count"))
             _append_float(reward_total, row.get("reward_total"))
             _append_float(reward_comfort, row.get("reward_comfort"))
@@ -1878,12 +1967,37 @@ def summarize_diagnostics_csv(path: str) -> Dict[str, Any]:
     summary["rl_fallback_reasons"] = ";".join(sorted(fallback_reasons))
     summary["planning_sources"] = ";".join(sorted(planning_sources))
     summary["rl_mean_safety_gain"] = _mean_or_empty(safety_gains)
+    summary["rl_residual_modes"] = ";".join(sorted(residual_modes))
+    summary["rl_action_scale_mean"] = _mean_or_empty(action_scales)
+    summary["rl_residual_gain_mean"] = _mean_or_empty(residual_gains)
+    summary["rl_scripted_residual_kinds"] = ";".join(sorted(scripted_residual_kinds))
     summary["rl_mean_action"] = _mean_or_empty(signed_actions)
     summary["rl_mean_abs_action"] = _mean_or_empty(abs_actions)
+    summary["rl_mean_raw_residual_damper"] = _mean_or_empty(signed_raw_residuals)
+    summary["rl_mean_abs_raw_residual_damper"] = _mean_or_empty(abs_raw_residuals)
+    summary["rl_mean_scaled_residual_damper"] = _mean_or_empty(signed_scaled_residuals)
+    summary["rl_mean_abs_scaled_residual_damper"] = _mean_or_empty(abs_scaled_residuals)
+    summary["rl_mean_scale_clipped_residual_damper"] = _mean_or_empty(signed_scale_clipped_residuals)
+    summary["rl_mean_abs_scale_clipped_residual_damper"] = _mean_or_empty(abs_scale_clipped_residuals)
     summary["rl_mean_residual_damper"] = _mean_or_empty(signed_residuals)
     summary["rl_mean_abs_residual_damper"] = _mean_or_empty(abs_residuals)
+    summary["rl_mean_final_residual_damper"] = _mean_or_empty(signed_final_residuals)
+    summary["rl_mean_abs_final_residual_damper"] = _mean_or_empty(abs_final_residuals)
     summary["mean_abs_action"] = summary["rl_mean_abs_action"]
+    summary["raw_mean_abs_action"] = summary["rl_mean_abs_action"]
+    summary["raw_mean_abs_residual_damper"] = summary["rl_mean_abs_raw_residual_damper"]
+    summary["scaled_mean_abs_residual_damper"] = summary["rl_mean_abs_scaled_residual_damper"]
+    summary["final_mean_abs_residual_damper"] = summary["rl_mean_abs_final_residual_damper"]
     summary["mean_abs_residual_damper"] = summary["rl_mean_abs_residual_damper"]
+    summary["residual_scale_clip_ratio"] = _ratio_or_empty(
+        summary["residual_scale_clip_rows"],
+        rl_rows)
+    summary["damper_final_clamp_ratio"] = _ratio_or_empty(
+        summary["damper_final_clamp_rows"],
+        rl_rows)
+    summary["residual_saturation_ratio"] = _ratio_or_empty(
+        summary["residual_saturation_rows"],
+        rl_rows)
     summary["mean_reward_total"] = _mean_or_empty(reward_total)
     summary["mean_reward_comfort"] = _mean_or_empty(reward_comfort)
     summary["mean_reward_stability"] = _mean_or_empty(reward_stability)
@@ -2049,17 +2163,54 @@ def prefixed_metrics(prefix: str, metrics: Mapping[str, Any]) -> Dict[str, Any]:
     return {prefix + key: value for key, value in metrics.items()}
 
 
-def read_profile_groups(path: str) -> Tuple[List[Dict[str, Any]], OrderedDict]:
+ProfileGroupKey = Tuple[str, str]
+
+
+def read_profile_groups(
+    path: str,
+) -> Tuple[List[Dict[str, Any]], OrderedDict, OrderedDict]:
     all_rows: List[Dict[str, Any]] = []
-    groups: OrderedDict[str, List[Dict[str, Any]]] = OrderedDict()
+    episode_groups: OrderedDict[str, List[Dict[str, Any]]] = OrderedDict()
+    actor_groups: OrderedDict[ProfileGroupKey, List[Dict[str, Any]]] = OrderedDict()
     if not os.path.isfile(path):
-        return all_rows, groups
+        return all_rows, episode_groups, actor_groups
     with open(path) as csv_file:
         for row in csv.DictReader(csv_file):
             all_rows.append(row)
             episode = row.get("episode_index", "")
-            groups.setdefault(episode, []).append(row)
-    return all_rows, groups
+            actor = row.get("actor_id", "")
+            episode_groups.setdefault(episode, []).append(row)
+            actor_groups.setdefault((episode, actor), []).append(row)
+    return all_rows, episode_groups, actor_groups
+
+
+def select_main_profile_group(
+    groups: Mapping[ProfileGroupKey, Sequence[Mapping[str, Any]]],
+) -> Tuple[ProfileGroupKey, List[Mapping[str, Any]]]:
+    if not groups:
+        return ("", ""), []
+    key, rows = max(groups.items(), key=lambda item: len(item[1]))
+    return key, list(rows)
+
+
+def elapsed_reset_detected(rows: Sequence[Mapping[str, Any]]) -> bool:
+    previous: Optional[float] = None
+    for row in rows:
+        elapsed = safe_float(row.get("elapsed_seconds"))
+        if elapsed is None:
+            continue
+        if previous is not None and elapsed < previous:
+            return True
+        previous = elapsed
+    return False
+
+
+def add_metric_warning(metrics: Dict[str, Any], reason: str) -> None:
+    existing = str(metrics.get("metric_warning", "") or "")
+    reasons = [part for part in existing.split(";") if part]
+    if reason not in reasons:
+        reasons.append(reason)
+    metrics["metric_warning"] = ";".join(reasons)
 
 
 def drop_warmup_rows(
@@ -2068,16 +2219,22 @@ def drop_warmup_rows(
 ) -> List[Mapping[str, Any]]:
     if warmup_seconds <= 0.0 or not rows:
         return list(rows)
-    first_elapsed = safe_float(rows[0].get("elapsed_seconds"))
-    if first_elapsed is None:
-        return list(rows)
-    cutoff = first_elapsed + warmup_seconds
     filtered = []
     for row in rows:
         elapsed = safe_float(row.get("elapsed_seconds"))
-        if elapsed is not None and elapsed >= cutoff:
+        if elapsed is not None and elapsed >= warmup_seconds:
             filtered.append(row)
-    return filtered if filtered else list(rows)
+    return filtered
+
+
+def elapsed_range(rows: Sequence[Mapping[str, Any]]) -> Tuple[Any, Any]:
+    elapsed_values = [
+        value for value in (safe_float(row.get("elapsed_seconds")) for row in rows)
+        if value is not None
+    ]
+    if not elapsed_values:
+        return "", ""
+    return min(elapsed_values), max(elapsed_values)
 
 
 def update_warmup_excluded_metrics(
@@ -2088,10 +2245,24 @@ def update_warmup_excluded_metrics(
     steady_fraction: float,
 ) -> None:
     filtered_rows = drop_warmup_rows(rows, warmup_seconds)
+    elapsed_min, elapsed_max = elapsed_range(filtered_rows)
     metrics["warmup_excluded_seconds"] = max(0.0, warmup_seconds)
     metrics["warmup_excluded_profile_rows"] = len(filtered_rows)
+    metrics["warmup_excluded_rows"] = len(filtered_rows)
+    metrics["warmup_excluded_valid"] = int(bool(filtered_rows))
     metrics["warmup_excluded_start_elapsed_seconds"] = (
         filtered_rows[0].get("elapsed_seconds", "") if filtered_rows else "")
+    metrics["warmup_excluded_elapsed_min"] = elapsed_min
+    metrics["warmup_excluded_elapsed_max"] = elapsed_max
+    metrics["metric_invalid"] = int(not bool(filtered_rows))
+    metrics.setdefault("metric_warning", "")
+    if not filtered_rows:
+        add_metric_warning(metrics, "warmup_filter_empty")
+        for key in comfort_metrics([], default_dt=default_dt):
+            metrics["warmup_excluded_comfort_" + key] = ""
+        for key in stability_metrics([], steady_fraction=steady_fraction):
+            metrics["warmup_excluded_stability_" + key] = ""
+        return
     metrics.update(prefixed_metrics(
         "warmup_excluded_comfort_",
         comfort_metrics(filtered_rows, default_dt=default_dt)))
@@ -2109,22 +2280,29 @@ def compute_profile_metrics(
     steady_fraction: float,
     metric_warmup_seconds: float,
 ) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
-    all_rows, groups = read_profile_groups(profile_path)
+    all_rows, _episode_groups, actor_groups = read_profile_groups(profile_path)
+    main_group, main_rows = select_main_profile_group(actor_groups)
+    main_episode, main_actor = main_group
+    actor_switch = len(actor_groups) > 1
+    elapsed_reset = elapsed_reset_detected(all_rows)
     episode_rows: List[Dict[str, Any]] = []
 
-    for episode, rows in groups.items():
+    for (episode, actor), rows in actor_groups.items():
         metric_row: Dict[str, Any] = {
             "scenario": scenario["name"],
             "label": scenario["label"],
             "controller": scenario["controller"],
             "seed": seed,
             "episode_index": episode,
-            "actor_id": rows[0].get("actor_id", "") if rows else "",
+            "actor_id": actor,
             "profile_rows": len(rows),
             "start_frame": rows[0].get("frame", "") if rows else "",
             "end_frame": rows[-1].get("frame", "") if rows else "",
             "start_elapsed_seconds": rows[0].get("elapsed_seconds", "") if rows else "",
             "end_elapsed_seconds": rows[-1].get("elapsed_seconds", "") if rows else "",
+            "metric_source": "profile_actor_episode_warmup_excluded",
+            "metric_invalid": 0,
+            "metric_warning": "",
         }
         metric_row.update(prefixed_metrics(
             "comfort_",
@@ -2148,30 +2326,54 @@ def compute_profile_metrics(
         "episode_index",
         "actor_id",
         "profile_rows",
+        "metric_source",
+        "metric_invalid",
+        "metric_warning",
         "start_frame",
         "end_frame",
         "start_elapsed_seconds",
         "end_elapsed_seconds",
         "warmup_excluded_seconds",
         "warmup_excluded_profile_rows",
+        "warmup_excluded_rows",
+        "warmup_excluded_valid",
         "warmup_excluded_start_elapsed_seconds",
+        "warmup_excluded_elapsed_min",
+        "warmup_excluded_elapsed_max",
     )
     write_csv_rows(metrics_path, episode_rows, preferred)
 
-    run_metrics: Dict[str, Any] = {"profile_rows": len(all_rows)}
-    if all_rows:
-        run_metrics.update(prefixed_metrics(
-            "comfort_",
-            comfort_metrics(all_rows, default_dt=default_dt)))
-        run_metrics.update(prefixed_metrics(
-            "stability_",
-            stability_metrics(all_rows, steady_fraction=steady_fraction)))
-        update_warmup_excluded_metrics(
-            run_metrics,
-            all_rows,
-            metric_warmup_seconds,
-            default_dt,
-            steady_fraction)
+    main_metric_row = next(
+        (
+            row for row in episode_rows
+            if row.get("episode_index") == main_episode and row.get("actor_id") == main_actor
+        ),
+        max(episode_rows, key=lambda row: int(row.get("profile_rows") or 0))
+        if episode_rows else {},
+    )
+    run_metrics: Dict[str, Any] = dict(main_metric_row)
+    non_main_rows = max(0, len(all_rows) - len(main_rows))
+    run_metrics.update({
+        "profile_rows": len(main_rows),
+        "profile_total_rows": len(all_rows),
+        "profile_main_rows": len(main_rows),
+        "profile_excluded_stale_rows": non_main_rows,
+        "profile_excluded_non_main_rows": non_main_rows,
+        "profile_main_episode_index": main_episode,
+        "profile_main_actor_id": main_actor,
+        "metric_main_episode_index": main_episode,
+        "metric_main_actor_id": main_actor,
+        "main_episode_index": main_episode,
+        "main_actor_id": main_actor,
+        "metric_actor_switch_detected": int(actor_switch),
+        "metric_elapsed_reset_detected": int(elapsed_reset),
+        "metric_source": "metrics_by_episode_main_actor" if main_rows else "",
+        "raw_metric_source": "metrics_by_episode_main_actor_raw" if main_rows else "",
+    })
+    if actor_switch:
+        add_metric_warning(run_metrics, "actor_switch_detected")
+    if elapsed_reset:
+        add_metric_warning(run_metrics, "elapsed_reset_detected")
     return run_metrics, episode_rows
 
 
@@ -2931,6 +3133,22 @@ def write_suite_summary(output_dir: str, rows: Sequence[Mapping[str, Any]]) -> T
         "sidecar_command_verifies",
         "sidecar_fatal_errors",
         "sidecar_runtime_errors",
+        "profile_total_rows",
+        "profile_main_rows",
+        "profile_excluded_stale_rows",
+        "profile_excluded_non_main_rows",
+        "profile_main_episode_index",
+        "profile_main_actor_id",
+        "metric_main_episode_index",
+        "metric_main_actor_id",
+        "main_episode_index",
+        "main_actor_id",
+        "metric_actor_switch_detected",
+        "metric_elapsed_reset_detected",
+        "metric_invalid",
+        "metric_warning",
+        "metric_source",
+        "raw_metric_source",
         "rl_diagnostic_rows",
         "rl_policy_available_rows",
         "rl_policy_available_ratio",
@@ -2941,10 +3159,28 @@ def write_suite_summary(output_dir: str, rows: Sequence[Mapping[str, Any]]) -> T
         "rl_zero_residual_rows",
         "rl_nonzero_residual_rows",
         "rl_mean_safety_gain",
+        "rl_residual_modes",
+        "rl_action_scale_mean",
+        "rl_residual_gain_mean",
+        "rl_scripted_residual_kinds",
         "rl_mean_action",
         "rl_mean_abs_action",
+        "rl_mean_raw_residual_damper",
+        "rl_mean_abs_raw_residual_damper",
+        "rl_mean_scaled_residual_damper",
+        "rl_mean_abs_scaled_residual_damper",
+        "rl_mean_scale_clipped_residual_damper",
+        "rl_mean_abs_scale_clipped_residual_damper",
         "rl_mean_residual_damper",
         "rl_mean_abs_residual_damper",
+        "rl_mean_final_residual_damper",
+        "rl_mean_abs_final_residual_damper",
+        "residual_scale_clip_rows",
+        "residual_scale_clip_ratio",
+        "damper_final_clamp_rows",
+        "damper_final_clamp_ratio",
+        "residual_saturation_rows",
+        "residual_saturation_ratio",
         "rl_observation_clip_count_max",
         "low_speed_mask_ratio",
         "low_speed_mask_rows",
@@ -2980,6 +3216,10 @@ def write_suite_summary(output_dir: str, rows: Sequence[Mapping[str, Any]]) -> T
         "fallback_ratio",
         "observation_clip_ratio",
         "mean_abs_action",
+        "raw_mean_abs_action",
+        "raw_mean_abs_residual_damper",
+        "scaled_mean_abs_residual_damper",
+        "final_mean_abs_residual_damper",
         "mean_abs_residual_damper",
         "mean_reward_total",
         "mean_reward_comfort",
@@ -3051,6 +3291,11 @@ def write_suite_summary(output_dir: str, rows: Sequence[Mapping[str, Any]]) -> T
         "comfort_peak_abs_vertical_jerk",
         "warmup_excluded_seconds",
         "warmup_excluded_profile_rows",
+        "warmup_excluded_rows",
+        "warmup_excluded_valid",
+        "warmup_excluded_start_elapsed_seconds",
+        "warmup_excluded_elapsed_min",
+        "warmup_excluded_elapsed_max",
         "warmup_excluded_comfort_comfort_score",
         "warmup_excluded_comfort_rms_vertical_acc",
         "warmup_excluded_comfort_rms_lateral_acc",

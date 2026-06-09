@@ -127,6 +127,75 @@ def test_action_scale_semantics_before_rate_limit_and_clamp():
     assert_close_tuple(dampers(result.command), [1.02, 1.02, 1.02, 1.02])
 
 
+def test_eval_time_action_scale_zero_preserves_raw_action_but_zeroes_final_residual():
+    baseline = SuspensionCommand.uniform(damper_scale=1.0)
+    projector = ResidualActionProjector(ResidualActionProjectorConfig(
+        max_damper_residual_scale=0.08,
+        max_damper_delta_per_step=1.0))
+
+    result = projector.project(
+        baseline,
+        [0.5, -0.5, 0.25, -0.25],
+        state(),
+        action_scale=0.0)
+
+    assert result.command.is_close(baseline, abs_tol=0.0, rel_tol=0.0)
+    assert result.sanitized_action == (0.5, -0.5, 0.25, -0.25)
+    assert result.raw_residual_damper_per_wheel == (0.04, -0.04, 0.02, -0.02)
+    assert result.scaled_residual_damper_per_wheel == (0.0, -0.0, 0.0, -0.0)
+    assert result.final_residual_damper_per_wheel == (0.0, 0.0, 0.0, 0.0)
+    assert result.diagnostics["rl_action_scale"] == 0.0
+    assert abs(result.diagnostics["rl_mean_abs_raw_residual_damper"] - 0.03) <= 1.0e-12
+    assert abs(result.diagnostics["rl_mean_abs_scaled_residual_damper"] - 0.0) <= 1.0e-12
+    assert abs(result.diagnostics["rl_mean_abs_final_residual_damper"] - 0.0) <= 1.0e-12
+
+
+def test_eval_time_action_scale_clips_scaled_residual_before_safety():
+    baseline = SuspensionCommand.uniform(damper_scale=1.0)
+    projector = ResidualActionProjector(ResidualActionProjectorConfig(
+        max_damper_residual_scale=0.08,
+        max_damper_delta_per_step=1.0))
+
+    result = projector.project(
+        baseline,
+        [0.25, 0.25, 0.25, 0.25],
+        state(),
+        action_scale=5.0)
+
+    assert_close_tuple(result.raw_residual_damper_per_wheel, (0.02, 0.02, 0.02, 0.02))
+    assert_close_tuple(result.scaled_residual_damper_per_wheel, (0.10, 0.10, 0.10, 0.10))
+    assert_close_tuple(result.scale_clipped_residual_damper_per_wheel, (0.08, 0.08, 0.08, 0.08))
+    assert_close_tuple(result.final_residual_damper_per_wheel, (0.08, 0.08, 0.08, 0.08))
+    assert result.diagnostics["rl_residual_scale_clip"] == 1
+    assert result.diagnostics["rl_residual_saturation"] == 1
+    assert result.diagnostics["rl_damper_final_clamp"] == 0
+
+
+def test_scripted_raw_residual_override_uses_same_safety_and_clamp_path():
+    baseline = SuspensionCommand.uniform(damper_scale=1.0)
+    projector = ResidualActionProjector(ResidualActionProjectorConfig(
+        max_damper_residual_scale=0.08,
+        max_damper_delta_per_step=1.0))
+
+    result = projector.project(
+        baseline,
+        [0.0, 0.0, 0.0, 0.0],
+        state(),
+        residual_mode="scripted",
+        scripted_residual_kind="const_p0p10",
+        scripted_residual_value=0.10,
+        raw_residual_override=[0.10, 0.10, 0.10, 0.10])
+
+    assert result.residual_mode == "scripted"
+    assert result.scripted_residual_kind == "const_p0p10"
+    assert result.sanitized_action == (0.0, 0.0, 0.0, 0.0)
+    assert_close_tuple(result.raw_residual_damper_per_wheel, (0.10, 0.10, 0.10, 0.10))
+    assert_close_tuple(result.scale_clipped_residual_damper_per_wheel, (0.08, 0.08, 0.08, 0.08))
+    assert result.diagnostics["rl_residual_mode"] == "scripted"
+    assert result.diagnostics["rl_scripted_residual_kind"] == "const_p0p10"
+    assert result.diagnostics["rl_residual_scale_clip"] == 1
+
+
 def test_speed_below_threshold_masks_nonzero_residual():
     baseline = SuspensionCommand.uniform(damper_scale=1.0)
     projector = ResidualActionProjector()

@@ -56,6 +56,11 @@ class ResidualRLConfig:
     invalid_policy_fallback: bool = True
 
     observation_clip: float = 5.0
+    rl_residual_mode: str = "learned_policy"
+    rl_action_scale: float = 1.0
+    rl_residual_gain: float = 1.0
+    scripted_residual_kind: str = ""
+    scripted_residual_value: float = 0.0
 
     @classmethod
     def from_mapping(cls, values: Mapping[str, Any]) -> "ResidualRLConfig":
@@ -137,6 +142,31 @@ class ResidualRLController(SuspensionController):
             context.state,
             observation_valid=observation_valid)
 
+        if self._uses_scripted_residual():
+            projection = self.projector.project(
+                baseline_command,
+                [0.0 for _ in range(cfg.wheel_count)],
+                context.state,
+                observation_valid=observation_valid,
+                action_scale=1.0,
+                residual_mode="scripted",
+                scripted_residual_kind=self._scripted_residual_kind(),
+                scripted_residual_value=self._scripted_residual_value(),
+                raw_residual_override=self._scripted_residuals())
+            diagnostics = self._diagnostics(
+                baseline_output,
+                obs_diag,
+                projection.sanitized_action,
+                projection.final_residual_damper_per_wheel,
+                projection.baseline_damper_per_wheel,
+                projection.final_damper_per_wheel,
+                projection.safety_gain,
+                fallback_reason=projection.fallback_reason,
+                safety_diag=projection.diagnostics)
+            self.previous_action = list(projection.sanitized_action)
+            self.previous_damper_scales = list(projection.final_damper_per_wheel)
+            return ControllerOutput(command=projection.command, diagnostics=diagnostics)
+
         if not self.policy.is_available and not cfg.allow_untrained_policy:
             return self._baseline_fallback(
                 baseline_output,
@@ -198,7 +228,9 @@ class ResidualRLController(SuspensionController):
             baseline_command,
             action_values,
             context.state,
-            observation_valid=observation_valid)
+            observation_valid=observation_valid,
+            action_scale=self._action_scale(),
+            residual_mode="learned_policy")
         diagnostics = self._diagnostics(
             baseline_output,
             obs_diag,
@@ -299,6 +331,41 @@ class ResidualRLController(SuspensionController):
             observation_valid=bool(obs_diag.get("observation_valid", 0)))
         return gain
 
+    def _uses_scripted_residual(self) -> bool:
+        return str(self.config.rl_residual_mode).strip().lower() == "scripted"
+
+    def _action_scale(self) -> float:
+        try:
+            explicit = float(self.config.rl_action_scale)
+        except (TypeError, ValueError):
+            explicit = 1.0
+        try:
+            gain = float(self.config.rl_residual_gain)
+        except (TypeError, ValueError):
+            gain = 1.0
+        value = explicit if abs(explicit - 1.0) > 1.0e-12 else gain
+        return max(0.0, value)
+
+    def _scripted_residual_kind(self) -> str:
+        kind = str(self.config.scripted_residual_kind).strip()
+        if kind:
+            return kind
+        value = self._scripted_residual_value()
+        if abs(value) <= 1.0e-12:
+            return "zero"
+        sign = "p" if value > 0.0 else "m"
+        magnitude = ("%.2f" % abs(value)).replace(".", "p")
+        return "const_%s%s" % (sign, magnitude)
+
+    def _scripted_residual_value(self) -> float:
+        try:
+            return float(self.config.scripted_residual_value)
+        except (TypeError, ValueError):
+            return 0.0
+
+    def _scripted_residuals(self) -> List[float]:
+        return [self._scripted_residual_value() for _ in range(self.config.wheel_count)]
+
     def _diagnostics(
         self,
         baseline_output: ControllerOutput,
@@ -317,6 +384,16 @@ class ResidualRLController(SuspensionController):
         diagnostics.update({
             "controller": self.name,
             "rl_baseline": self.config.baseline,
+            "rl_residual_mode": (
+                "scripted" if self._uses_scripted_residual() else "learned_policy"),
+            "rl_action_scale": self._action_scale(),
+            "rl_residual_gain": self._action_scale(),
+            "rl_scripted_residual_kind": (
+                self._scripted_residual_kind()
+                if self._uses_scripted_residual() else ""),
+            "rl_scripted_residual_value": (
+                self._scripted_residual_value()
+                if self._uses_scripted_residual() else ""),
             "rl_policy_available": int(self.policy.is_available),
             "rl_policy_status": self.policy.status,
             "rl_policy_builtin_id": getattr(self.policy, "builtin_id", ""),
@@ -334,6 +411,8 @@ class ResidualRLController(SuspensionController):
             "rl_mean_abs_action": _mean_abs(action),
             "rl_mean_residual_damper": _mean(residuals),
             "rl_mean_abs_residual_damper": _mean_abs(residuals),
+            "rl_mean_final_residual_damper": _mean(residuals),
+            "rl_mean_abs_final_residual_damper": _mean_abs(residuals),
         })
         for name in PLANNING_FEATURES:
             diagnostics[name] = obs_diag.get(name, 0.0)
