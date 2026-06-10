@@ -37,21 +37,34 @@ def add_carla_to_path(pythonapi_root: Optional[str] = None) -> tuple:
 
     root = pythonapi_root or pythonapi_root_from_here()
     platform = "win-amd64" if os.name == "nt" else "linux-x86_64"
-    candidates = glob.glob(os.path.join(root, "carla", "build", "lib.*"))
-    candidates += glob.glob(os.path.join(
-        root,
-        "carla",
-        "dist",
-        "carla-*%d.%d-%s.egg" % (
-            sys.version_info.major,
-            sys.version_info.minor,
-            platform)))
+    build_candidates = glob.glob(os.path.join(root, "carla", "build", "lib.*"))
+    py_build_tag = "cpython-%d%d" % sys.version_info[:2]
+    preferred_build_candidates = [
+        path for path in build_candidates
+        if py_build_tag in os.path.basename(path)
+    ]
+    other_build_candidates = [
+        path for path in build_candidates
+        if path not in preferred_build_candidates
+    ]
+    candidates = sorted(preferred_build_candidates) + sorted(other_build_candidates)
+
+    if os.environ.get("CARLA_USE_EGG", "0") == "1":
+        candidates += sorted(glob.glob(os.path.join(
+            root,
+            "carla",
+            "dist",
+            "carla-*%d.%d-%s.egg" % (
+                sys.version_info.major,
+                sys.version_info.minor,
+                platform))))
 
     added = []
     for path in reversed(candidates):
-        if path not in sys.path:
-            sys.path.insert(0, path)
-            added.append(path)
+        while path in sys.path:
+            sys.path.remove(path)
+        sys.path.insert(0, path)
+        added.append(path)
     return tuple(added)
 
 

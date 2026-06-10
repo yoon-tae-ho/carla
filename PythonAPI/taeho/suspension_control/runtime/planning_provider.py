@@ -98,7 +98,14 @@ class JsonlPlanningInfoProvider(PlanningInfoProvider):
                 self.offset = 0
             with open(self.path) as jsonl_file:
                 jsonl_file.seek(self.offset)
-                for line in jsonl_file:
+                while True:
+                    line_offset = jsonl_file.tell()
+                    line = jsonl_file.readline()
+                    if not line:
+                        break
+                    if not line.endswith("\n"):
+                        jsonl_file.seek(line_offset)
+                        break
                     self._read_line(line)
                 self.offset = jsonl_file.tell()
         except OSError as error:

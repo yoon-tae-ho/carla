@@ -969,7 +969,17 @@ class SuspensionExperimentSidecar(threading.Thread):
         writer.writerow({field: row.get(field, "") for field in EVENT_FIELDS})
 
     def connect_world(self, event_writer: csv.DictWriter):
-        carla = import_carla()
+        try:
+            carla = import_carla()
+        except Exception as error:
+            self.error = error
+            self.log_event(
+                event_writer,
+                "fatal_error",
+                message="import_carla failed: %s: %s" % (
+                    error.__class__.__name__,
+                    error))
+            return None
         while not self.stop_event.is_set():
             try:
                 client = carla.Client(self.args.host, self.args.port)

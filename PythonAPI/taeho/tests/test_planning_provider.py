@@ -48,6 +48,55 @@ def test_jsonl_provider_reads_valid_lines_and_ignores_malformed(tmp_path):
     assert info.preview_summary()["preview_brake_max"] == 0.3
 
 
+def test_jsonl_provider_reads_lead_planning_preview_schema(tmp_path):
+    path = Path(tmp_path) / "lead_planning.jsonl"
+    path.write_text(
+        "{\"schema\": \"taeho.planning_preview.v1\", "
+        "\"source\": \"lead_tfv6\", "
+        "\"available\": true, "
+        "\"step\": 123, "
+        "\"frame\": 4567, "
+        "\"timestamp\": 12.3, "
+        "\"horizon_dt\": 0.1, "
+        "\"trajectory_xy\": [[2.0, 0.1], [4.0, 0.2], [6.0, 0.4]], "
+        "\"target_speed\": [7.8], "
+        "\"curvature\": [0.0, 0.03, 0.0], "
+        "\"steer\": [0.12], "
+        "\"throttle\": [0.35], "
+        "\"brake\": [0.0], "
+        "\"metadata\": {\"valid_prediction\": true, \"ego_speed_mps\": 8.5}, "
+        "\"extra\": {\"target_points_ego\": {\"current\": [5.0, 0.5]}}}\n")
+    provider = JsonlPlanningInfoProvider(str(path), max_frame_lag=5)
+    info = provider.get(4567, VehicleState(frame=4567, speed=8.0), None)
+    assert info.source == "lead_tfv6"
+    assert info.available is True
+    assert info.frame == 4567
+    assert info.trajectory_xy == ((2.0, 0.1), (4.0, 0.2), (6.0, 0.4))
+    assert info.target_speed == (7.8,)
+    assert info.metadata["valid_prediction"] is True
+    assert info.extra["target_points_ego"]["current"] == [5.0, 0.5]
+
+
+def test_jsonl_provider_waits_for_partial_final_line(tmp_path):
+    path = Path(tmp_path) / "planning_partial.jsonl"
+    path.write_text(
+        "{\"frame\": 10, \"target_speed\": [8.0]}\n"
+        "{\"frame\": 11")
+    provider = JsonlPlanningInfoProvider(str(path), max_frame_lag=5)
+
+    info = provider.get(10, VehicleState(frame=10, speed=8.0), None)
+    assert info.frame == 10
+    assert info.metadata["planning_jsonl_malformed_lines"] == 0
+
+    with path.open("a") as jsonl_file:
+        jsonl_file.write(", \"target_speed\": [9.0]}\n")
+
+    info = provider.get(11, VehicleState(frame=11, speed=8.0), None)
+    assert info.frame == 11
+    assert info.target_speed == (9.0,)
+    assert info.metadata["planning_jsonl_malformed_lines"] == 0
+
+
 def test_jsonl_provider_rejects_stale_frames(tmp_path):
     path = Path(tmp_path) / "planning.jsonl"
     path.write_text("{\"frame\": 4, \"target_speed\": [5.0]}\n")
