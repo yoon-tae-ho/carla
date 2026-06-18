@@ -1206,15 +1206,17 @@ def _default_routes_path() -> str:
             garage_root,
             "leaderboard",
             "data",
-            "suspension_town13_short.xml") if garage_root else "",
-        "/workspace/e2e_models/carla_garage/leaderboard/data/suspension_town13_short.xml",
+            "suspension_routes",
+            "suspension_town04_fig8_route18_noscenario.xml") if garage_root else "",
+        "/workspace/e2e_models/carla_garage/leaderboard/data/suspension_routes/suspension_town04_fig8_route18_noscenario.xml",
         os.path.join(
             _sim_root_from_here(),
             "e2e_models",
             "carla_garage",
             "leaderboard",
             "data",
-            "suspension_town13_short.xml"),
+            "suspension_routes",
+            "suspension_town04_fig8_route18_noscenario.xml"),
     )
     for path in candidates:
         if path and os.path.isfile(os.path.expanduser(path)):

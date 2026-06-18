@@ -15,7 +15,10 @@ Default scenarios:
 
 Optional scenario:
 
-  S3_skyhook:  apply controllers.skyhook.SkyhookController every tick
+  S3_skyhook:          apply controllers.skyhook.SkyhookController every tick
+  S19_skyhook_roll:    apply controllers.skyhook_roll.SkyhookRollController
+  S20_skyhook_roll_yaw:
+                       apply SkyhookRollController with yaw-aware distribution
 """
 
 from __future__ import annotations
@@ -42,6 +45,10 @@ from suspension_control.controllers.base import (
     SuspensionCommand,
     WheelScale,
 )
+from suspension_control.controllers.constant_scale import (
+    ConstantScaleConfig,
+    ConstantScaleController,
+)
 from suspension_control.controllers.identity import IdentityController
 from suspension_control.controllers.pid import FeedbackPIDConfig, FeedbackPIDController
 from suspension_control.controllers.rl_residual import (
@@ -49,6 +56,14 @@ from suspension_control.controllers.rl_residual import (
     ResidualRLController,
 )
 from suspension_control.controllers.skyhook import SkyhookConfig, SkyhookController
+from suspension_control.controllers.skyhook_roll import (
+    SkyhookRollConfig,
+    SkyhookRollController,
+)
+from suspension_control.controllers.target_speed_schedule import (
+    TargetSpeedScheduleConfig,
+    TargetSpeedScheduleController,
+)
 from suspension_control.metrics.comfort import comfort_metrics
 from suspension_control.metrics.stability import stability_metrics
 from suspension_control.runtime.carla_adapter import (
@@ -81,7 +96,8 @@ DEFAULT_ROUTES = os.path.join(
     "carla_garage",
     "leaderboard",
     "data",
-    "suspension_town13_short.xml",
+    "suspension_routes",
+    "suspension_town04_fig8_route18_noscenario.xml",
 )
 DEFAULT_TFPP_OUTPUT_ROOT = os.path.join(
     SIM_ROOT, "e2e_models", "outputs", "transfuserpp")
@@ -89,6 +105,24 @@ DEFAULT_PID_CONFIG = os.path.join(
     SCRIPT_DIR, "suspension_control", "configs", "pid.yaml")
 DEFAULT_SKYHOOK_CONFIG = os.path.join(
     SCRIPT_DIR, "suspension_control", "configs", "skyhook.yaml")
+DEFAULT_SKYHOOK_ROLL_CONFIG = os.path.join(
+    SCRIPT_DIR, "suspension_control", "configs", "skyhook_roll.yaml")
+DEFAULT_SKYHOOK_ROLL_YAW_CONFIG = os.path.join(
+    SCRIPT_DIR, "suspension_control", "configs", "skyhook_roll_yaw.yaml")
+DEFAULT_CONSTANT_SCALE_CONFIG = os.path.join(
+    SCRIPT_DIR, "suspension_control", "configs", "constant_damper_1p03.yaml")
+DEFAULT_TARGET_SPEED_SCHEDULE_CONFIG = os.path.join(
+    SCRIPT_DIR,
+    "suspension_control",
+    "configs",
+    "lead_target_speed_schedule_v0.yaml",
+)
+DEFAULT_TARGET_SPEED_SCHEDULE_SAFE_CONFIG = os.path.join(
+    SCRIPT_DIR,
+    "suspension_control",
+    "configs",
+    "lead_target_speed_schedule_v0_safe.yaml",
+)
 DEFAULT_RL_RESIDUAL_CONFIG = os.path.join(
     SCRIPT_DIR, "suspension_control", "configs", "rl_residual.yaml")
 
@@ -198,6 +232,42 @@ SCENARIOS = OrderedDict((
         "uses_suspension_api": True,
         "phase2c_expected_action": "",
         "phase2c_role": "random_action_canary",
+    }),
+    ("constant_damper_1p03", {
+        "name": "S15_constant_damper_1p03",
+        "label": "S15 constant damper 1.03",
+        "controller": "constant_scale",
+        "uses_suspension_api": True,
+    }),
+    ("target_speed_schedule_v0", {
+        "name": "S16_target_speed_schedule_v0",
+        "label": "S16 target-speed schedule v0",
+        "controller": "target_speed_schedule",
+        "uses_suspension_api": True,
+    }),
+    ("target_speed_schedule_shadow", {
+        "name": "S17_target_speed_schedule_shadow",
+        "label": "S17 target-speed schedule shadow",
+        "controller": "target_speed_schedule_shadow",
+        "uses_suspension_api": True,
+    }),
+    ("target_speed_schedule_v0_safe", {
+        "name": "S18_target_speed_schedule_v0_safe",
+        "label": "S18 target-speed schedule v0 safe",
+        "controller": "target_speed_schedule_safe",
+        "uses_suspension_api": True,
+    }),
+    ("skyhook_roll", {
+        "name": "S19_skyhook_roll",
+        "label": "S19 skyhook + roll",
+        "controller": "skyhook_roll",
+        "uses_suspension_api": True,
+    }),
+    ("skyhook_roll_yaw", {
+        "name": "S20_skyhook_roll_yaw",
+        "label": "S20 skyhook + roll yaw",
+        "controller": "skyhook_roll_yaw",
+        "uses_suspension_api": True,
     }),
 ))
 
@@ -314,6 +384,56 @@ DIAGNOSTIC_FIELDS = (
     "skyhook_max_activity",
     "skyhook_roll_rate_rad",
     "skyhook_pitch_rate_rad",
+    "skyhook_roll_mode",
+    "skyhook_roll_roll_rad",
+    "skyhook_roll_roll_rate_rad",
+    "skyhook_roll_pitch_rate_rad",
+    "skyhook_roll_yaw_rate_rad",
+    "skyhook_roll_local_ay",
+    "skyhook_roll_lat_activity",
+    "skyhook_roll_damping_activity",
+    "skyhook_roll_stiffness_activity",
+    "skyhook_roll_front_share",
+    "skyhook_roll_yaw_ref",
+    "skyhook_roll_under_yaw_error_norm",
+    "skyhook_roll_outer_side_sign",
+    "skyhook_roll_fallback_reason",
+    "skyhook_roll_side_weight_fl",
+    "skyhook_roll_side_weight_fr",
+    "skyhook_roll_side_weight_rl",
+    "skyhook_roll_side_weight_rr",
+    "skyhook_roll_spring_scale_fl",
+    "skyhook_roll_spring_scale_fr",
+    "skyhook_roll_spring_scale_rl",
+    "skyhook_roll_spring_scale_rr",
+    "skyhook_roll_damper_scale_fl",
+    "skyhook_roll_damper_scale_fr",
+    "skyhook_roll_damper_scale_rl",
+    "skyhook_roll_damper_scale_rr",
+    "skyhook_roll_damper_add_fl",
+    "skyhook_roll_damper_add_fr",
+    "skyhook_roll_damper_add_rl",
+    "skyhook_roll_damper_add_rr",
+    "skyhook_roll_spring_add_fl",
+    "skyhook_roll_spring_add_fr",
+    "skyhook_roll_spring_add_rl",
+    "skyhook_roll_spring_add_rr",
+    "tss_target_speed_raw",
+    "tss_target_speed_valid",
+    "tss_target_speed_ema",
+    "tss_low_speed_component",
+    "tss_target_speed_drop_rate",
+    "tss_drop_component",
+    "tss_damper_scale_raw",
+    "tss_damper_scale_bounded",
+    "tss_damper_scale_computed",
+    "tss_damper_scale_applied",
+    "tss_rate_limited",
+    "tss_fallback_reason",
+    "tss_shadow_mode",
+    "tss_used_curvature",
+    "tss_used_trajectory",
+    "tss_used_control",
     "planning_available",
     "planning_source",
     "planning_frame",
@@ -587,6 +707,37 @@ def build_skyhook_config(path: str) -> SkyhookConfig:
     return SkyhookConfig()
 
 
+def build_skyhook_roll_config(path: str) -> SkyhookRollConfig:
+    if path and os.path.isfile(path):
+        return SkyhookRollConfig.from_mapping(read_flat_yaml(path))
+    return SkyhookRollConfig()
+
+
+def build_constant_scale_config(path: str) -> ConstantScaleConfig:
+    if path and os.path.isfile(path):
+        return ConstantScaleConfig.from_mapping(read_flat_yaml(path))
+    return ConstantScaleConfig()
+
+
+def build_target_speed_schedule_config(path: str) -> TargetSpeedScheduleConfig:
+    if path and os.path.isfile(path):
+        return TargetSpeedScheduleConfig.from_mapping(read_flat_yaml(path))
+    return TargetSpeedScheduleConfig()
+
+
+def build_target_speed_schedule_shadow_config(
+    path: str,
+) -> TargetSpeedScheduleConfig:
+    values: Dict[str, Any] = {}
+    if path and os.path.isfile(path):
+        values.update(read_flat_yaml(path))
+    values.update({
+        "shadow_mode": True,
+        "shadow_damper_scale": 1.0,
+    })
+    return TargetSpeedScheduleConfig.from_mapping(values)
+
+
 def build_rl_residual_config(
     args: argparse.Namespace,
     baseline_override: str = "",
@@ -649,6 +800,25 @@ def make_controller(controller_name: str, args: argparse.Namespace):
         return FeedbackPIDController(build_pid_config(args.pid_config))
     if controller_name == "skyhook":
         return SkyhookController(build_skyhook_config(args.skyhook_config))
+    if controller_name == "skyhook_roll":
+        return SkyhookRollController(build_skyhook_roll_config(
+            args.skyhook_roll_config))
+    if controller_name == "skyhook_roll_yaw":
+        return SkyhookRollController(build_skyhook_roll_config(
+            args.skyhook_roll_yaw_config))
+    if controller_name == "constant_scale":
+        return ConstantScaleController(build_constant_scale_config(
+            args.constant_scale_config))
+    if controller_name == "target_speed_schedule":
+        return TargetSpeedScheduleController(build_target_speed_schedule_config(
+            args.target_speed_schedule_config))
+    if controller_name == "target_speed_schedule_shadow":
+        return TargetSpeedScheduleController(
+            build_target_speed_schedule_shadow_config(
+                args.target_speed_schedule_config))
+    if controller_name == "target_speed_schedule_safe":
+        return TargetSpeedScheduleController(build_target_speed_schedule_config(
+            args.target_speed_schedule_safe_config))
     if controller_name == "rl_residual":
         return ResidualRLController(build_rl_residual_config(args))
     if controller_name == "rl_residual_pid":
@@ -3472,7 +3642,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--routes",
         default=DEFAULT_ROUTES,
-        help="routes XML path (default: suspension_town13_short.xml)")
+        help="routes XML path (default: suspension Town04 route18 no-scenario)")
     parser.add_argument(
         "--routes-subset",
         default="",
@@ -3503,7 +3673,13 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "rl_random_small_skyhook,"
         "rl_const_action_plus_0p25_skyhook,"
         "rl_const_action_minus_0p25_skyhook,"
-        "rl_random_action_0p10_skyhook "
+        "rl_random_action_0p10_skyhook,"
+        "constant_damper_1p03,"
+        "target_speed_schedule_v0,"
+        "target_speed_schedule_shadow,"
+        "target_speed_schedule_v0_safe,"
+        "skyhook_roll,"
+        "skyhook_roll_yaw "
         "(default: stock,identity,pid)")
     parser.add_argument(
         "--baseline-scenario",
@@ -3526,6 +3702,26 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--skyhook-config",
         default=DEFAULT_SKYHOOK_CONFIG,
         help="flat YAML skyhook config path")
+    parser.add_argument(
+        "--skyhook-roll-config",
+        default=DEFAULT_SKYHOOK_ROLL_CONFIG,
+        help="flat YAML skyhook+roll config path")
+    parser.add_argument(
+        "--skyhook-roll-yaw-config",
+        default=DEFAULT_SKYHOOK_ROLL_YAW_CONFIG,
+        help="flat YAML yaw-aware skyhook+roll config path")
+    parser.add_argument(
+        "--constant-scale-config",
+        default=DEFAULT_CONSTANT_SCALE_CONFIG,
+        help="flat YAML constant-scale config path")
+    parser.add_argument(
+        "--target-speed-schedule-config",
+        default=DEFAULT_TARGET_SPEED_SCHEDULE_CONFIG,
+        help="flat YAML target-speed schedule config path")
+    parser.add_argument(
+        "--target-speed-schedule-safe-config",
+        default=DEFAULT_TARGET_SPEED_SCHEDULE_SAFE_CONFIG,
+        help="flat YAML safe target-speed schedule config path")
     parser.add_argument(
         "--rl-residual-config",
         default=DEFAULT_RL_RESIDUAL_CONFIG,

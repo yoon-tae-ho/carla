@@ -1,0 +1,16 @@
+# Step 07 ultra-conservative target-speed-only damping schedule.
+
+damper_min: 1.0
+damper_max: 1.01
+low_speed_gain: 0.01
+drop_gain: 0.0
+low_speed_reference_mps: 8.0
+drop_rate_reference_mps2: 2.0
+smoothing_time_constant_sec: 1.0
+max_scale_rate_per_sec: 0.02
+fallback_damper_scale: 1.0
+spring_scale: 1.0
+default_dt: 0.05
+wheel_count: 4
+shadow_mode: false
+shadow_damper_scale: 1.0

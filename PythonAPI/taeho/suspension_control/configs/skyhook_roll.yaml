@@ -1,0 +1,71 @@
+# Default config for controllers.skyhook_roll.SkyhookRollController.
+# Keys intentionally match SkyhookRollConfig fields.
+
+default_dt: 0.05
+wheel_count: 4
+
+# Base skyhook layer.
+base_damper_scale: 1.0
+min_damper_scale: 0.80
+max_damper_scale: 1.40
+max_damper_delta_per_step: 0.04
+corner_velocity_deadband: 0.02
+corner_velocity_scale: 1.0
+skyhook_gain: 0.25
+
+# Spring is frozen at identity scale; this benchmark isolates damping.
+base_spring_scale: 1.0
+min_spring_scale: 0.95
+max_spring_scale: 1.15
+max_spring_delta_per_step: 0.02
+enable_roll_spring_control: false
+
+# Geometry follows the existing skyhook controller convention.
+half_track_m: 0.85
+half_wheelbase_m: 1.45
+
+# Roll activity.
+g: 9.81
+roll_rate_deadband_rad: 0.015
+roll_rate_scale_radps: 0.35
+roll_angle_deadband_rad: 0.0035
+roll_angle_scale_rad: 0.060
+lateral_accel_start_g: 0.15
+lateral_accel_full_g: 0.60
+lateral_accel_side_deadband: 0.30
+roll_rate_weight: 0.60
+roll_angle_weight: 0.25
+lateral_accel_weight: 0.35
+roll_angle_to_spring_weight: 0.00
+max_roll_activity: 1.50
+
+# Roll scale gains.
+roll_damper_gain: 0.12
+max_roll_damper_add: 0.25
+roll_spring_gain: 0.00
+max_roll_spring_add: 0.00
+
+# Front/rear and side distribution.
+nominal_front_roll_distribution: 0.60
+min_front_roll_distribution: 0.35
+max_front_roll_distribution: 0.75
+max_front_distribution_delta_per_step: 0.04
+outer_side_sign_from_ay: -1.0
+outer_side_sign_from_roll: 0.0
+outer_side_bias: 0.30
+inner_side_relief: 0.10
+
+# Yaw-aware distribution is disabled for the fixed benchmark.
+enable_yaw_distribution: false
+yaw_activation_start_g: 0.40
+yaw_activation_full_g: 0.60
+max_road_wheel_angle_rad: 0.60
+yaw_ref_min_speed: 5.0
+yaw_ref_limit_lat_g: 0.85
+yaw_front_distribution_kp: 0.08
+yaw_front_distribution_ki: 0.00
+yaw_error_integral_limit: 2.0
+yaw_integral_decay: 0.98
+small_yaw_ref: 0.03
+
+debug: false

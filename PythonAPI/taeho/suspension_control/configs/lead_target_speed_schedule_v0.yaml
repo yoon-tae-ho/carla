@@ -1,0 +1,14 @@
+# Step 07 conservative target-speed-only damping schedule.
+
+damper_min: 1.0
+damper_max: 1.05
+low_speed_gain: 0.03
+drop_gain: 0.02
+low_speed_reference_mps: 8.0
+drop_rate_reference_mps2: 2.0
+smoothing_time_constant_sec: 0.5
+max_scale_rate_per_sec: 0.10
+fallback_damper_scale: 1.0
+spring_scale: 1.0
+default_dt: 0.05
+wheel_count: 4

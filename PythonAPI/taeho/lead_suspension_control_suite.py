@@ -38,7 +38,8 @@ DEFAULT_LEAD_ROUTES = os.path.join(
     "carla_garage",
     "leaderboard",
     "data",
-    "suspension_town13_short.xml",
+    "suspension_routes",
+    "suspension_town04_fig8_route18_noscenario.xml",
 )
 DEFAULT_LEAD_SUITE_ROOT = os.path.join(
     E2E_ROOT, "outputs", "lead", "suspension_suite")
@@ -215,7 +216,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
             action.help = "run_lead_debug_route.sh path"
         elif action.dest == "routes":
             action.default = DEFAULT_LEAD_ROUTES
-            action.help = "LEAD routes XML path (default: suspension_town13_short.xml)"
+            action.help = "LEAD routes XML path (default: suspension Town04 route18 no-scenario)"
         elif action.dest == "scenarios":
             action.default = "stock,identity,skyhook"
             action.help = (
@@ -228,7 +229,13 @@ def build_arg_parser() -> argparse.ArgumentParser:
                 "rl_random_small_skyhook,"
                 "rl_const_action_plus_0p25_skyhook,"
                 "rl_const_action_minus_0p25_skyhook,"
-                "rl_random_action_0p10_skyhook "
+                "rl_random_action_0p10_skyhook,"
+                "constant_damper_1p03,"
+                "target_speed_schedule_v0,"
+                "target_speed_schedule_shadow,"
+                "target_speed_schedule_v0_safe,"
+                "skyhook_roll,"
+                "skyhook_roll_yaw "
                 "(default: stock,identity,skyhook)")
     return parser
 
