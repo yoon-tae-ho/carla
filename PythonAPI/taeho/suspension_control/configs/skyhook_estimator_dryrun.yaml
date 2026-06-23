@@ -1,0 +1,17 @@
+controller_version: skyhook_estimator_dryrun_v1
+default_dt: 0.05
+wheel_count: 4
+
+half_track_m: 0.85
+half_wheelbase_m: 1.45
+
+neutral_damper_scale: 1.0
+soft_damper_scale: 0.80
+hard_damper_scale: 1.30
+sprung_velocity_deadband_mps: 0.02
+relative_velocity_deadband_mps: 0.005
+skyhook_product_deadband: 0.0001
+
+require_velocity: true
+require_contact: true
+identity_if_any_wheel_invalid: true

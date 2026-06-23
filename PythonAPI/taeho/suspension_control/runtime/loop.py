@@ -15,7 +15,10 @@ from ..controllers.base import (
 )
 from .carla_adapter import (
     apply_suspension_command,
+    native_damper_rate_by_wheel,
+    native_spring_strength_by_wheel,
     read_suspension_scale_summary,
+    read_suspension_state,
     read_vehicle_state,
     validate_suspension_control,
 )
@@ -89,12 +92,30 @@ class SuspensionControlLoop:
             control=vehicle_control)
         dt = before_state.dt if before_state.dt > 0.0 else self.default_dt
         current_suspension = self.vehicle.get_suspension_physics_control()
+        suspension_state = None
+        suspension_state_valid = False
+        suspension_state_invalid_reason = ""
+        if bool(getattr(self.controller, "requires_suspension_state", False)):
+            (
+                suspension_state,
+                suspension_state_valid,
+                suspension_state_invalid_reason,
+            ) = read_suspension_state(
+                self.vehicle,
+                expected_wheels=len(self.native_suspension.wheels))
         context = ControllerContext(
             state=before_state,
             previous_state=self.previous_state,
             planning=planning or PlanningInfo.empty(),
             native_suspension=self.native_suspension,
             current_suspension=current_suspension,
+            suspension_state=suspension_state,
+            suspension_state_valid=suspension_state_valid,
+            suspension_state_invalid_reason=suspension_state_invalid_reason,
+            native_spring_strength_by_wheel=native_spring_strength_by_wheel(
+                self.native_suspension),
+            native_damper_rate_by_wheel=native_damper_rate_by_wheel(
+                self.native_suspension),
             step=step_index,
             dt=dt)
         output = self.controller.compute(context)

@@ -27,6 +27,7 @@
 #include "carla/rpc/LabelledPoint.h"
 #include "carla/rpc/VehicleWheels.h"
 #include "carla/rpc/SuspensionPhysicsControl.h"
+#include "carla/rpc/SuspensionState.h"
 #include "carla/rpc/Texture.h"
 #include "carla/rpc/MaterialParameter.h"
 
@@ -266,6 +267,10 @@ namespace detail {
 
     rpc::SuspensionPhysicsControl GetVehicleSuspensionPhysicsControl(const Vehicle &vehicle) const {
       return _client.GetVehicleSuspensionPhysicsControl(vehicle.GetId());
+    }
+
+    rpc::SuspensionState GetVehicleSuspensionState(const Vehicle &vehicle) const {
+      return _client.GetVehicleSuspensionState(vehicle.GetId());
     }
 
     rpc::VehicleLightState GetVehicleLightState(const Vehicle &vehicle) const {

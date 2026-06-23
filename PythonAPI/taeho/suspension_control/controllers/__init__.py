@@ -11,6 +11,10 @@ from .base import (
     WheelScale,
 )
 from .constant_scale import ConstantScaleConfig, ConstantScaleController
+from .estimators import (
+    SkyhookEstimatorDryRunConfig,
+    SkyhookEstimatorDryRunController,
+)
 from .identity import IdentityController
 from .pid import FeedbackPIDConfig, FeedbackPIDController
 from .rl_residual import ResidualRLConfig, ResidualRLController
@@ -36,6 +40,8 @@ __all__ = [
     "PlanningPreviewSuspensionController",
     "ResidualRLConfig",
     "ResidualRLController",
+    "SkyhookEstimatorDryRunConfig",
+    "SkyhookEstimatorDryRunController",
     "SkyhookConfig",
     "SkyhookController",
     "SkyhookRollConfig",

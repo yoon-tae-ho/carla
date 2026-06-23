@@ -18,7 +18,9 @@ Optional scenario:
   S3_skyhook:          apply controllers.skyhook.SkyhookController every tick
   S19_skyhook_roll:    apply controllers.skyhook_roll.SkyhookRollController
   S20_skyhook_roll_yaw:
-                       apply SkyhookRollController with yaw-aware distribution
+                       log yaw-aware distribution proposal; apply S19 command
+  S21_skyhook_estimator_dryrun:
+                       log state-based skyhook candidates, apply identity
 """
 
 from __future__ import annotations
@@ -49,6 +51,10 @@ from suspension_control.controllers.constant_scale import (
     ConstantScaleConfig,
     ConstantScaleController,
 )
+from suspension_control.controllers.estimators import (
+    SkyhookEstimatorDryRunConfig,
+    SkyhookEstimatorDryRunController,
+)
 from suspension_control.controllers.identity import IdentityController
 from suspension_control.controllers.pid import FeedbackPIDConfig, FeedbackPIDController
 from suspension_control.controllers.rl_residual import (
@@ -69,7 +75,10 @@ from suspension_control.metrics.stability import stability_metrics
 from suspension_control.runtime.carla_adapter import (
     apply_suspension_command,
     import_carla,
+    native_damper_rate_by_wheel,
+    native_spring_strength_by_wheel,
     read_suspension_scale_summary,
+    read_suspension_state,
     read_vehicle_state,
     validate_suspension_control,
 )
@@ -105,6 +114,11 @@ DEFAULT_PID_CONFIG = os.path.join(
     SCRIPT_DIR, "suspension_control", "configs", "pid.yaml")
 DEFAULT_SKYHOOK_CONFIG = os.path.join(
     SCRIPT_DIR, "suspension_control", "configs", "skyhook.yaml")
+DEFAULT_SKYHOOK_ESTIMATOR_DRYRUN_CONFIG = os.path.join(
+    SCRIPT_DIR,
+    "suspension_control",
+    "configs",
+    "skyhook_estimator_dryrun.yaml")
 DEFAULT_SKYHOOK_ROLL_CONFIG = os.path.join(
     SCRIPT_DIR, "suspension_control", "configs", "skyhook_roll.yaml")
 DEFAULT_SKYHOOK_ROLL_YAW_CONFIG = os.path.join(
@@ -151,6 +165,7 @@ SCENARIOS = OrderedDict((
         "label": "S3 skyhook damping",
         "controller": "skyhook",
         "uses_suspension_api": True,
+        "needs_suspension_state": True,
     }),
     ("rl_residual_skyhook", {
         "name": "S4_rl_residual_skyhook",
@@ -262,12 +277,21 @@ SCENARIOS = OrderedDict((
         "label": "S19 skyhook + roll",
         "controller": "skyhook_roll",
         "uses_suspension_api": True,
+        "needs_suspension_state": True,
     }),
     ("skyhook_roll_yaw", {
         "name": "S20_skyhook_roll_yaw",
         "label": "S20 skyhook + roll yaw",
         "controller": "skyhook_roll_yaw",
         "uses_suspension_api": True,
+        "needs_suspension_state": True,
+    }),
+    ("skyhook_estimator_dryrun", {
+        "name": "S21_skyhook_estimator_dryrun",
+        "label": "S21 skyhook estimator dry-run",
+        "controller": "skyhook_estimator_dryrun",
+        "uses_suspension_api": True,
+        "needs_suspension_state": True,
     }),
 ))
 
@@ -329,6 +353,111 @@ EVENT_FIELDS = (
     "message",
 )
 
+WHEEL_DIAGNOSTIC_LABELS = ("fl", "fr", "rl", "rr")
+
+SUSPENSION_STATE_DIAGNOSTIC_FIELDS = (
+    "controller_version",
+    "dt",
+    "state_valid",
+    "suspension_state_valid",
+    "contact_valid_all",
+    "fallback_mode",
+    "identity_fallback_this_tick",
+    "identity_fallback_reason",
+    "identity_fallback_that_would_have_occurred",
+    "angular_velocity_source",
+    "angular_velocity_unit_converted",
+    "roll_deg",
+    "pitch_deg",
+    "yaw_deg",
+    "roll_rate_rad_s",
+    "pitch_rate_rad_s",
+    "yaw_rate_rad_s",
+    "local_vx",
+    "local_vy",
+    "local_vz",
+    "local_ax",
+    "local_az",
+    "pitch",
+    "yaw",
+    "throttle",
+    "brake",
+    "steer",
+    "compression_convention_validated",
+    "suspension_state_source",
+    "suspension_failure_reason",
+    "suspension_wheel_count",
+    "skyhook_dryrun_command_identity",
+    "v_rel_extension_candidate_A",
+    "v_rel_extension_candidate_B",
+    "skyhook_product_candidate_A",
+    "skyhook_product_candidate_B",
+    "proposed_damper_scale_candidate_A",
+    "proposed_damper_scale_candidate_B",
+    "soft_mode_ratio_candidate_A",
+    "soft_mode_ratio_candidate_B",
+    "hard_mode_ratio_candidate_A",
+    "hard_mode_ratio_candidate_B",
+    "neutral_mode_ratio_candidate_A",
+    "neutral_mode_ratio_candidate_B",
+    "skyhook_law",
+    "skyhook_c_scale",
+    "relative_extension_sign",
+    "soft_mode_ratio",
+    "hard_mode_ratio",
+    "neutral_mode_ratio",
+) + tuple(
+    "%s_%s" % (field, label)
+    for label in WHEEL_DIAGNOSTIC_LABELS
+    for field in (
+        "wheel_index_raw",
+        "wheel_name_canonical",
+        "raw_suspension_offset_m",
+        "compression_m",
+        "suspension_travel_m",
+        "suspension_velocity_mps",
+        "normalized_travel",
+        "contact_valid",
+        "wheel_in_air",
+        "field_valid",
+        "velocity_valid",
+        "native_spring_strength",
+        "native_damper_rate",
+        "v_sprung",
+        "v_roll",
+        "v_pitch",
+        "v_rel_extension_mps",
+        "F_sky_ideal",
+        "F_roll_ideal",
+        "F_total_ideal",
+        "C_native",
+        "C_required",
+        "semi_active_feasible",
+        "skyhook_only_target_damper",
+        "final_target_damper",
+        "final_spring_scale",
+        "final_damper_scale",
+        "rate_limited_damper",
+        "clamped_damper",
+        "roll_softening_guard_active",
+        "soft_mode",
+        "hard_mode",
+        "neutral_mode",
+        "v_rel_extension_candidate_A",
+        "v_rel_extension_candidate_B",
+        "skyhook_product_candidate_A",
+        "skyhook_product_candidate_B",
+        "proposed_damper_scale_candidate_A",
+        "proposed_damper_scale_candidate_B",
+        "soft_mode_candidate_A",
+        "soft_mode_candidate_B",
+        "hard_mode_candidate_A",
+        "hard_mode_candidate_B",
+        "neutral_mode_candidate_A",
+        "neutral_mode_candidate_B",
+    )
+)
+
 DIAGNOSTIC_FIELDS = (
     "wall_time",
     "scenario",
@@ -344,6 +473,7 @@ DIAGNOSTIC_FIELDS = (
     "roll",
     "local_ay",
     "yaw_rate",
+) + SUSPENSION_STATE_DIAGNOSTIC_FIELDS + (
     "command_applied",
     "apply_count",
     "verify_count",
@@ -384,6 +514,11 @@ DIAGNOSTIC_FIELDS = (
     "skyhook_max_activity",
     "skyhook_roll_rate_rad",
     "skyhook_pitch_rate_rad",
+    "roll_gate_global",
+    "roll_ay_gate",
+    "roll_rate_gate",
+    "roll_angle_gate",
+    "roll_softening_guard_ratio",
     "skyhook_roll_mode",
     "skyhook_roll_roll_rad",
     "skyhook_roll_roll_rate_rad",
@@ -396,6 +531,26 @@ DIAGNOSTIC_FIELDS = (
     "skyhook_roll_front_share",
     "skyhook_roll_yaw_ref",
     "skyhook_roll_under_yaw_error_norm",
+    "yaw_distribution_mode",
+    "yaw_apply_enabled",
+    "yaw_rate_ref",
+    "yaw_rate_actual",
+    "yaw_error",
+    "yaw_error_norm",
+    "yaw_activation",
+    "front_distribution_nominal",
+    "front_distribution_applied",
+    "rear_distribution_applied",
+    "front_distribution_proposed",
+    "rear_distribution_proposed",
+    "road_wheel_angle_rad",
+    "yaw_reference_speed_mps",
+    "skyhook_roll_yaw_rate_ref",
+    "skyhook_roll_yaw_rate_actual",
+    "skyhook_roll_yaw_error",
+    "skyhook_roll_yaw_activation",
+    "skyhook_roll_front_distribution_proposed",
+    "skyhook_roll_rear_distribution_proposed",
     "skyhook_roll_outer_side_sign",
     "skyhook_roll_fallback_reason",
     "skyhook_roll_side_weight_fl",
@@ -707,6 +862,14 @@ def build_skyhook_config(path: str) -> SkyhookConfig:
     return SkyhookConfig()
 
 
+def build_skyhook_estimator_dryrun_config(
+    path: str,
+) -> SkyhookEstimatorDryRunConfig:
+    if path and os.path.isfile(path):
+        return SkyhookEstimatorDryRunConfig.from_mapping(read_flat_yaml(path))
+    return SkyhookEstimatorDryRunConfig()
+
+
 def build_skyhook_roll_config(path: str) -> SkyhookRollConfig:
     if path and os.path.isfile(path):
         return SkyhookRollConfig.from_mapping(read_flat_yaml(path))
@@ -800,6 +963,10 @@ def make_controller(controller_name: str, args: argparse.Namespace):
         return FeedbackPIDController(build_pid_config(args.pid_config))
     if controller_name == "skyhook":
         return SkyhookController(build_skyhook_config(args.skyhook_config))
+    if controller_name == "skyhook_estimator_dryrun":
+        return SkyhookEstimatorDryRunController(
+            build_skyhook_estimator_dryrun_config(
+                args.skyhook_estimator_dryrun_config))
     if controller_name == "skyhook_roll":
         return SkyhookRollController(build_skyhook_roll_config(
             args.skyhook_roll_config))
@@ -1105,6 +1272,10 @@ class SuspensionExperimentSidecar(threading.Thread):
     def controller_name(self) -> str:
         return str(self.scenario["controller"])
 
+    @property
+    def needs_suspension_state(self) -> bool:
+        return bool(self.scenario.get("needs_suspension_state", False))
+
     def base_row(self, actor: Any = None) -> Dict[str, Any]:
         actor_id = getattr(actor, "id", "")
         return {
@@ -1290,6 +1461,17 @@ class SuspensionExperimentSidecar(threading.Thread):
         controller = self.controller_by_actor_id[actor_id]
         previous_state = self.previous_state_by_actor_id.get(actor_id)
         current_suspension = actor.get_suspension_physics_control()
+        suspension_state = None
+        suspension_state_valid = False
+        suspension_state_invalid_reason = ""
+        if self.needs_suspension_state:
+            (
+                suspension_state,
+                suspension_state_valid,
+                suspension_state_invalid_reason,
+            ) = read_suspension_state(
+                actor,
+                expected_wheels=len(native.wheels))
         dt = state.dt if state.dt > 0.0 else self.args.default_dt
         if self.scenario.get("force_empty_planning", False):
             planning = PlanningInfo.empty()
@@ -1301,6 +1483,11 @@ class SuspensionExperimentSidecar(threading.Thread):
             planning=planning,
             native_suspension=native,
             current_suspension=current_suspension,
+            suspension_state=suspension_state,
+            suspension_state_valid=suspension_state_valid,
+            suspension_state_invalid_reason=suspension_state_invalid_reason,
+            native_spring_strength_by_wheel=native_spring_strength_by_wheel(native),
+            native_damper_rate_by_wheel=native_damper_rate_by_wheel(native),
             step=state.step,
             dt=dt)
         output = controller.compute(context)
@@ -1382,10 +1569,34 @@ class SuspensionExperimentSidecar(threading.Thread):
             "frame": state.frame,
             "elapsed_seconds": state.elapsed_seconds,
             "step": state.step,
+            "dt": dt,
+            "state_valid": 1,
             "speed": state.speed,
             "roll": state.roll,
+            "pitch": state.pitch,
+            "yaw": state.yaw,
             "local_ay": state.local_ay,
             "yaw_rate": state.yaw_rate,
+            "angular_velocity_source": "Actor.get_angular_velocity",
+            "angular_velocity_unit_converted": "deg_s_to_rad_s",
+            "roll_deg": state.roll,
+            "pitch_deg": state.pitch,
+            "yaw_deg": state.yaw,
+            "roll_rate_rad_s": math.radians(state.roll_rate),
+            "pitch_rate_rad_s": math.radians(state.pitch_rate),
+            "yaw_rate_rad_s": math.radians(state.yaw_rate),
+            "local_vx": state.local_vx,
+            "local_vy": state.local_vy,
+            "local_vz": state.vz,
+            "local_ax": state.local_ax,
+            "local_az": state.az,
+            "throttle": state.throttle,
+            "brake": state.brake,
+            "steer": state.steer,
+            "suspension_state_valid": (
+                int(bool(suspension_state_valid))
+                if self.needs_suspension_state else ""),
+            "identity_fallback_reason": suspension_state_invalid_reason,
             "command_applied": 1,
             "apply_count": self.apply_count_by_actor_id[actor_id],
             "verify_count": self.verify_count_by_actor_id[actor_id],
@@ -1733,6 +1944,52 @@ def count_csv_rows(path: str) -> int:
         return sum(1 for _ in reader)
 
 
+def init_suspension_state_summary(summary: Dict[str, Any]) -> None:
+    summary.update({
+        "suspension_state_rows": 0,
+        "suspension_state_valid_rows": 0,
+        "suspension_state_valid_ratio": "",
+        "identity_fallback_rows_that_would_have_occurred": 0,
+        "identity_fallback_ratio_that_would_have_occurred": "",
+        "suspension_nan_count": 0,
+        "suspension_inf_count": 0,
+        "suspension_missing_count": 0,
+        "braking_pitch_event_rows": 0,
+        "braking_front_minus_rear_compression_mean": "",
+        "cornering_roll_event_rows": 0,
+        "cornering_outer_minus_inner_compression_mean": "",
+        "vertical_event_rows": 0,
+        "vertical_abs_accel_max": "",
+    })
+    for candidate in ("A", "B"):
+        summary.update({
+            "soft_mode_ratio_candidate_%s_mean" % candidate: "",
+            "hard_mode_ratio_candidate_%s_mean" % candidate: "",
+            "neutral_mode_ratio_candidate_%s_mean" % candidate: "",
+        })
+    summary.update({
+        "soft_mode_ratio_mean": "",
+        "hard_mode_ratio_mean": "",
+        "neutral_mode_ratio_mean": "",
+    })
+    for label in WHEEL_DIAGNOSTIC_LABELS:
+        summary.update({
+            "field_valid_ratio_%s" % label: "",
+            "contact_valid_ratio_%s" % label: "",
+            "wheel_in_air_ratio_%s" % label: "",
+            "compression_m_%s_min" % label: "",
+            "compression_m_%s_mean" % label: "",
+            "compression_m_%s_max" % label: "",
+            "compression_m_%s_std" % label: "",
+            "suspension_velocity_mps_%s_min" % label: "",
+            "suspension_velocity_mps_%s_mean" % label: "",
+            "suspension_velocity_mps_%s_max" % label: "",
+            "suspension_velocity_mps_%s_std" % label: "",
+            "suspension_velocity_abs_mps_%s_p95" % label: "",
+            "suspension_velocity_abs_mps_%s_p99" % label: "",
+        })
+
+
 def summarize_diagnostics_csv(path: str) -> Dict[str, Any]:
     summary: Dict[str, Any] = {
         "diagnostic_rows": 0,
@@ -1869,7 +2126,25 @@ def summarize_diagnostics_csv(path: str) -> Dict[str, Any]:
         "red_light_count": 0,
         "blocked_vehicle_count": 0,
         "route_timeout_count": 0,
+        "yaw_proposal_rows": 0,
+        "yaw_activation_nonzero_rows": 0,
+        "yaw_activation_nonzero_ratio": "",
+        "yaw_rate_ref_mean": "",
+        "yaw_rate_actual_mean": "",
+        "yaw_error_mean": "",
+        "yaw_error_abs_mean": "",
+        "yaw_activation_mean": "",
+        "front_distribution_proposed_mean": "",
+        "rear_distribution_proposed_mean": "",
+        "front_distribution_applied_mean": "",
+        "yaw_proposal_event_window_rows": 0,
+        "yaw_proposal_event_yaw_error_mean": "",
+        "yaw_proposal_event_abs_yaw_error_mean": "",
+        "yaw_proposal_event_activation_mean": "",
+        "yaw_proposal_event_front_distribution_mean": "",
+        "yaw_proposal_event_rear_distribution_mean": "",
     }
+    init_suspension_state_summary(summary)
     if not os.path.isfile(path):
         return summary
 
@@ -1930,10 +2205,111 @@ def summarize_diagnostics_csv(path: str) -> Dict[str, Any]:
     red_light_counts: List[float] = []
     blocked_counts: List[float] = []
     timeout_counts: List[float] = []
+    suspension_state_values: List[float] = []
+    identity_fallback_values: List[float] = []
+    field_valid_values: Dict[str, List[float]] = {
+        label: [] for label in WHEEL_DIAGNOSTIC_LABELS
+    }
+    contact_valid_values: Dict[str, List[float]] = {
+        label: [] for label in WHEEL_DIAGNOSTIC_LABELS
+    }
+    wheel_in_air_values: Dict[str, List[float]] = {
+        label: [] for label in WHEEL_DIAGNOSTIC_LABELS
+    }
+    compression_values: Dict[str, List[float]] = {
+        label: [] for label in WHEEL_DIAGNOSTIC_LABELS
+    }
+    velocity_values: Dict[str, List[float]] = {
+        label: [] for label in WHEEL_DIAGNOSTIC_LABELS
+    }
+    velocity_abs_values: Dict[str, List[float]] = {
+        label: [] for label in WHEEL_DIAGNOSTIC_LABELS
+    }
+    mode_ratios: Dict[str, List[float]] = {
+        "soft": [],
+        "hard": [],
+        "neutral": [],
+        "soft_A": [],
+        "hard_A": [],
+        "neutral_A": [],
+        "soft_B": [],
+        "hard_B": [],
+        "neutral_B": [],
+    }
+    braking_front_minus_rear: List[float] = []
+    cornering_outer_minus_inner: List[float] = []
+    vertical_abs_accel: List[float] = []
+    yaw_rate_refs: List[float] = []
+    yaw_rate_actuals: List[float] = []
+    yaw_errors: List[float] = []
+    yaw_abs_errors: List[float] = []
+    yaw_activations: List[float] = []
+    front_distribution_proposals: List[float] = []
+    rear_distribution_proposals: List[float] = []
+    front_distribution_applied_values: List[float] = []
+    yaw_event_errors: List[float] = []
+    yaw_event_abs_errors: List[float] = []
+    yaw_event_activations: List[float] = []
+    yaw_event_front_distributions: List[float] = []
+    yaw_event_rear_distributions: List[float] = []
 
     with open(path) as csv_file:
         for row in csv.DictReader(csv_file):
             summary["diagnostic_rows"] += 1
+            _collect_suspension_state_summary(
+                row,
+                summary,
+                suspension_state_values,
+                identity_fallback_values,
+                field_valid_values,
+                contact_valid_values,
+                wheel_in_air_values,
+                compression_values,
+                velocity_values,
+                velocity_abs_values,
+                mode_ratios,
+                braking_front_minus_rear,
+                cornering_outer_minus_inner,
+                vertical_abs_accel)
+            if str(row.get("yaw_distribution_mode", "")).strip() == "log_only":
+                summary["yaw_proposal_rows"] += 1
+                yaw_ref = safe_float(row.get("yaw_rate_ref"))
+                yaw_actual = safe_float(row.get("yaw_rate_actual"))
+                yaw_error = safe_float(row.get("yaw_error"))
+                yaw_activation = safe_float(row.get("yaw_activation"))
+                front_distribution = safe_float(
+                    row.get("front_distribution_proposed"))
+                rear_distribution = safe_float(
+                    row.get("rear_distribution_proposed"))
+                front_applied = safe_float(
+                    row.get("front_distribution_applied"))
+                if yaw_ref is not None:
+                    yaw_rate_refs.append(yaw_ref)
+                if yaw_actual is not None:
+                    yaw_rate_actuals.append(yaw_actual)
+                if yaw_error is not None:
+                    yaw_errors.append(yaw_error)
+                    yaw_abs_errors.append(abs(yaw_error))
+                if yaw_activation is not None:
+                    yaw_activations.append(yaw_activation)
+                    if yaw_activation > 1.0e-12:
+                        summary["yaw_activation_nonzero_rows"] += 1
+                        yaw_event_activations.append(yaw_activation)
+                        if yaw_error is not None:
+                            yaw_event_errors.append(yaw_error)
+                            yaw_event_abs_errors.append(abs(yaw_error))
+                        if front_distribution is not None:
+                            yaw_event_front_distributions.append(
+                                front_distribution)
+                        if rear_distribution is not None:
+                            yaw_event_rear_distributions.append(
+                                rear_distribution)
+                if front_distribution is not None:
+                    front_distribution_proposals.append(front_distribution)
+                if rear_distribution is not None:
+                    rear_distribution_proposals.append(rear_distribution)
+                if front_applied is not None:
+                    front_distribution_applied_values.append(front_applied)
             has_rl = row.get("rl_policy_available", "") != ""
             if has_rl:
                 summary["rl_diagnostic_rows"] += 1
@@ -2267,6 +2643,31 @@ def summarize_diagnostics_csv(path: str) -> Dict[str, Any]:
     summary["red_light_count"] = max(red_light_counts) if red_light_counts else 0
     summary["blocked_vehicle_count"] = max(blocked_counts) if blocked_counts else 0
     summary["route_timeout_count"] = max(timeout_counts) if timeout_counts else 0
+    summary["yaw_activation_nonzero_ratio"] = _ratio_or_empty(
+        summary["yaw_activation_nonzero_rows"],
+        summary["yaw_proposal_rows"])
+    summary["yaw_rate_ref_mean"] = _mean_or_empty(yaw_rate_refs)
+    summary["yaw_rate_actual_mean"] = _mean_or_empty(yaw_rate_actuals)
+    summary["yaw_error_mean"] = _mean_or_empty(yaw_errors)
+    summary["yaw_error_abs_mean"] = _mean_or_empty(yaw_abs_errors)
+    summary["yaw_activation_mean"] = _mean_or_empty(yaw_activations)
+    summary["front_distribution_proposed_mean"] = _mean_or_empty(
+        front_distribution_proposals)
+    summary["rear_distribution_proposed_mean"] = _mean_or_empty(
+        rear_distribution_proposals)
+    summary["front_distribution_applied_mean"] = _mean_or_empty(
+        front_distribution_applied_values)
+    summary["yaw_proposal_event_window_rows"] = len(yaw_event_activations)
+    summary["yaw_proposal_event_yaw_error_mean"] = _mean_or_empty(
+        yaw_event_errors)
+    summary["yaw_proposal_event_abs_yaw_error_mean"] = _mean_or_empty(
+        yaw_event_abs_errors)
+    summary["yaw_proposal_event_activation_mean"] = _mean_or_empty(
+        yaw_event_activations)
+    summary["yaw_proposal_event_front_distribution_mean"] = _mean_or_empty(
+        yaw_event_front_distributions)
+    summary["yaw_proposal_event_rear_distribution_mean"] = _mean_or_empty(
+        yaw_event_rear_distributions)
     summary["rl_observation_clip_count_max"] = (
         max(clip_counts) if clip_counts else "")
     _update_min_mean_max(summary, "safety_gate_active_speed", gate_active_speeds)
@@ -2291,7 +2692,235 @@ def summarize_diagnostics_csv(path: str) -> Dict[str, Any]:
         summary,
         "safety_gate_active_abs_yaw_rate",
         gate_active_yaw_rates)
+    update_suspension_state_summary(
+        summary,
+        suspension_state_values,
+        identity_fallback_values,
+        field_valid_values,
+        contact_valid_values,
+        wheel_in_air_values,
+        compression_values,
+        velocity_values,
+        velocity_abs_values,
+        mode_ratios,
+        braking_front_minus_rear,
+        cornering_outer_minus_inner,
+        vertical_abs_accel)
     return summary
+
+
+def _collect_suspension_state_summary(
+    row: Mapping[str, Any],
+    summary: Dict[str, Any],
+    suspension_state_values: List[float],
+    identity_fallback_values: List[float],
+    field_valid_values: Dict[str, List[float]],
+    contact_valid_values: Dict[str, List[float]],
+    wheel_in_air_values: Dict[str, List[float]],
+    compression_values: Dict[str, List[float]],
+    velocity_values: Dict[str, List[float]],
+    velocity_abs_values: Dict[str, List[float]],
+    mode_ratios: Dict[str, List[float]],
+    braking_front_minus_rear: List[float],
+    cornering_outer_minus_inner: List[float],
+    vertical_abs_accel: List[float],
+) -> None:
+    state_valid = safe_float(row.get("suspension_state_valid"))
+    if state_valid is None:
+        return
+    summary["suspension_state_rows"] += 1
+    suspension_state_values.append(state_valid)
+
+    fallback = safe_float(row.get("identity_fallback_that_would_have_occurred"))
+    if fallback is not None:
+        identity_fallback_values.append(fallback)
+
+    for candidate in ("A", "B"):
+        _append_float(
+            mode_ratios["soft_%s" % candidate],
+            row.get("soft_mode_ratio_candidate_%s" % candidate))
+        _append_float(
+            mode_ratios["hard_%s" % candidate],
+            row.get("hard_mode_ratio_candidate_%s" % candidate))
+        _append_float(
+            mode_ratios["neutral_%s" % candidate],
+            row.get("neutral_mode_ratio_candidate_%s" % candidate))
+    _append_float(mode_ratios["soft"], row.get("soft_mode_ratio"))
+    _append_float(mode_ratios["hard"], row.get("hard_mode_ratio"))
+    _append_float(mode_ratios["neutral"], row.get("neutral_mode_ratio"))
+
+    for label in WHEEL_DIAGNOSTIC_LABELS:
+        _append_float(field_valid_values[label], row.get("field_valid_%s" % label))
+        _append_float(contact_valid_values[label], row.get("contact_valid_%s" % label))
+        _append_float(wheel_in_air_values[label], row.get("wheel_in_air_%s" % label))
+        compression = safe_float(row.get("compression_m_%s" % label))
+        if compression is not None:
+            compression_values[label].append(compression)
+        velocity = safe_float(row.get("suspension_velocity_mps_%s" % label))
+        if velocity is not None:
+            velocity_values[label].append(velocity)
+            velocity_abs_values[label].append(abs(velocity))
+        for field in (
+                "raw_suspension_offset_m",
+                "compression_m",
+                "suspension_travel_m",
+                "suspension_velocity_mps",
+                "normalized_travel"):
+            _count_nonfinite_cell(summary, row.get("%s_%s" % (field, label)))
+
+    fl = safe_float(row.get("compression_m_fl"))
+    fr = safe_float(row.get("compression_m_fr"))
+    rl = safe_float(row.get("compression_m_rl"))
+    rr = safe_float(row.get("compression_m_rr"))
+    if None not in (fl, fr, rl, rr):
+        local_ax = safe_float(row.get("local_ax"))
+        brake = safe_float(row.get("brake"))
+        pitch = safe_float(row.get("pitch"))
+        if (
+                (brake is not None and brake >= 0.25) or
+                (local_ax is not None and local_ax <= -1.0) or
+                (pitch is not None and pitch <= -1.0)):
+            braking_front_minus_rear.append(((fl + fr) * 0.5) - ((rl + rr) * 0.5))
+
+        local_ay = safe_float(row.get("local_ay"))
+        roll = safe_float(row.get("roll"))
+        if (
+                (local_ay is not None and abs(local_ay) >= 2.5) or
+                (roll is not None and abs(roll) >= 2.0)):
+            if local_ay is not None and local_ay < 0.0:
+                outer = (fr + rr) * 0.5
+                inner = (fl + rl) * 0.5
+            else:
+                outer = (fl + rl) * 0.5
+                inner = (fr + rr) * 0.5
+            cornering_outer_minus_inner.append(outer - inner)
+
+    local_az = safe_float(row.get("local_az"))
+    if local_az is not None and abs(local_az) >= 2.0:
+        vertical_abs_accel.append(abs(local_az))
+
+
+def update_suspension_state_summary(
+    summary: Dict[str, Any],
+    suspension_state_values: Sequence[float],
+    identity_fallback_values: Sequence[float],
+    field_valid_values: Mapping[str, Sequence[float]],
+    contact_valid_values: Mapping[str, Sequence[float]],
+    wheel_in_air_values: Mapping[str, Sequence[float]],
+    compression_values: Mapping[str, Sequence[float]],
+    velocity_values: Mapping[str, Sequence[float]],
+    velocity_abs_values: Mapping[str, Sequence[float]],
+    mode_ratios: Mapping[str, Sequence[float]],
+    braking_front_minus_rear: Sequence[float],
+    cornering_outer_minus_inner: Sequence[float],
+    vertical_abs_accel: Sequence[float],
+) -> None:
+    summary["suspension_state_valid_rows"] = sum(
+        1 for value in suspension_state_values if value > 0.0)
+    summary["suspension_state_valid_ratio"] = _ratio_or_empty(
+        summary["suspension_state_valid_rows"],
+        summary["suspension_state_rows"])
+    summary["identity_fallback_rows_that_would_have_occurred"] = sum(
+        1 for value in identity_fallback_values if value > 0.0)
+    summary["identity_fallback_ratio_that_would_have_occurred"] = _ratio_or_empty(
+        summary["identity_fallback_rows_that_would_have_occurred"],
+        len(identity_fallback_values))
+
+    summary["soft_mode_ratio_mean"] = _mean_or_empty(
+        mode_ratios.get("soft", ()))
+    summary["hard_mode_ratio_mean"] = _mean_or_empty(
+        mode_ratios.get("hard", ()))
+    summary["neutral_mode_ratio_mean"] = _mean_or_empty(
+        mode_ratios.get("neutral", ()))
+
+    for candidate in ("A", "B"):
+        summary["soft_mode_ratio_candidate_%s_mean" % candidate] = _mean_or_empty(
+            mode_ratios.get("soft_%s" % candidate, ()))
+        summary["hard_mode_ratio_candidate_%s_mean" % candidate] = _mean_or_empty(
+            mode_ratios.get("hard_%s" % candidate, ()))
+        summary["neutral_mode_ratio_candidate_%s_mean" % candidate] = _mean_or_empty(
+            mode_ratios.get("neutral_%s" % candidate, ()))
+
+    for label in WHEEL_DIAGNOSTIC_LABELS:
+        summary["field_valid_ratio_%s" % label] = _mean_or_empty(
+            field_valid_values.get(label, ()))
+        summary["contact_valid_ratio_%s" % label] = _mean_or_empty(
+            contact_valid_values.get(label, ()))
+        summary["wheel_in_air_ratio_%s" % label] = _mean_or_empty(
+            wheel_in_air_values.get(label, ()))
+        _update_series_stats(
+            summary,
+            "compression_m_%s" % label,
+            compression_values.get(label, ()))
+        _update_series_stats(
+            summary,
+            "suspension_velocity_mps_%s" % label,
+            velocity_values.get(label, ()))
+        abs_values = velocity_abs_values.get(label, ())
+        if abs_values:
+            summary["suspension_velocity_abs_mps_%s_p95" % label] = _percentile(
+                abs_values,
+                95.0)
+            summary["suspension_velocity_abs_mps_%s_p99" % label] = _percentile(
+                abs_values,
+                99.0)
+
+    summary["braking_pitch_event_rows"] = len(braking_front_minus_rear)
+    summary["braking_front_minus_rear_compression_mean"] = _mean_or_empty(
+        braking_front_minus_rear)
+    summary["cornering_roll_event_rows"] = len(cornering_outer_minus_inner)
+    summary["cornering_outer_minus_inner_compression_mean"] = _mean_or_empty(
+        cornering_outer_minus_inner)
+    summary["vertical_event_rows"] = len(vertical_abs_accel)
+    summary["vertical_abs_accel_max"] = (
+        max(vertical_abs_accel) if vertical_abs_accel else "")
+
+
+def _count_nonfinite_cell(summary: Dict[str, Any], value: Any) -> None:
+    if value in ("", None):
+        summary["suspension_missing_count"] += 1
+        return
+    text = str(value).strip().lower()
+    if text == "nan":
+        summary["suspension_nan_count"] += 1
+    elif text in ("inf", "+inf", "-inf", "infinity", "+infinity", "-infinity"):
+        summary["suspension_inf_count"] += 1
+
+
+def _update_series_stats(
+    summary: Dict[str, Any],
+    prefix: str,
+    values: Sequence[float],
+) -> None:
+    if not values:
+        return
+    summary["%s_min" % prefix] = min(values)
+    summary["%s_mean" % prefix] = _mean_or_empty(values)
+    summary["%s_max" % prefix] = max(values)
+    summary["%s_std" % prefix] = _std_or_empty(values)
+
+
+def _std_or_empty(values: Sequence[float]) -> Any:
+    if not values:
+        return ""
+    mean = sum(values) / float(len(values))
+    variance = sum((value - mean) ** 2 for value in values) / float(len(values))
+    return math.sqrt(variance)
+
+
+def _percentile(values: Sequence[float], percentile: float) -> Any:
+    if not values:
+        return ""
+    ordered = sorted(float(value) for value in values)
+    if len(ordered) == 1:
+        return ordered[0]
+    position = (len(ordered) - 1) * float(percentile) / 100.0
+    lower = int(math.floor(position))
+    upper = int(math.ceil(position))
+    if lower == upper:
+        return ordered[lower]
+    fraction = position - lower
+    return ordered[lower] * (1.0 - fraction) + ordered[upper] * fraction
 
 
 def _append_float(values: List[float], value: Any) -> None:
@@ -3329,6 +3958,41 @@ def write_suite_summary(output_dir: str, rows: Sequence[Mapping[str, Any]]) -> T
         "metric_warning",
         "metric_source",
         "raw_metric_source",
+        "suspension_state_rows",
+        "suspension_state_valid_rows",
+        "suspension_state_valid_ratio",
+        "identity_fallback_rows_that_would_have_occurred",
+        "identity_fallback_ratio_that_would_have_occurred",
+        "suspension_nan_count",
+        "suspension_inf_count",
+        "suspension_missing_count",
+        "field_valid_ratio_fl",
+        "field_valid_ratio_fr",
+        "field_valid_ratio_rl",
+        "field_valid_ratio_rr",
+        "contact_valid_ratio_fl",
+        "contact_valid_ratio_fr",
+        "contact_valid_ratio_rl",
+        "contact_valid_ratio_rr",
+        "wheel_in_air_ratio_fl",
+        "wheel_in_air_ratio_fr",
+        "wheel_in_air_ratio_rl",
+        "wheel_in_air_ratio_rr",
+        "soft_mode_ratio_mean",
+        "hard_mode_ratio_mean",
+        "neutral_mode_ratio_mean",
+        "soft_mode_ratio_candidate_A_mean",
+        "hard_mode_ratio_candidate_A_mean",
+        "neutral_mode_ratio_candidate_A_mean",
+        "soft_mode_ratio_candidate_B_mean",
+        "hard_mode_ratio_candidate_B_mean",
+        "neutral_mode_ratio_candidate_B_mean",
+        "braking_pitch_event_rows",
+        "braking_front_minus_rear_compression_mean",
+        "cornering_roll_event_rows",
+        "cornering_outer_minus_inner_compression_mean",
+        "vertical_event_rows",
+        "vertical_abs_accel_max",
         "rl_diagnostic_rows",
         "rl_policy_available_rows",
         "rl_policy_available_ratio",
@@ -3461,6 +4125,23 @@ def write_suite_summary(output_dir: str, rows: Sequence[Mapping[str, Any]]) -> T
         "red_light_count",
         "blocked_vehicle_count",
         "route_timeout_count",
+        "yaw_proposal_rows",
+        "yaw_activation_nonzero_rows",
+        "yaw_activation_nonzero_ratio",
+        "yaw_rate_ref_mean",
+        "yaw_rate_actual_mean",
+        "yaw_error_mean",
+        "yaw_error_abs_mean",
+        "yaw_activation_mean",
+        "front_distribution_proposed_mean",
+        "rear_distribution_proposed_mean",
+        "front_distribution_applied_mean",
+        "yaw_proposal_event_window_rows",
+        "yaw_proposal_event_yaw_error_mean",
+        "yaw_proposal_event_abs_yaw_error_mean",
+        "yaw_proposal_event_activation_mean",
+        "yaw_proposal_event_front_distribution_mean",
+        "yaw_proposal_event_rear_distribution_mean",
         "comfort_comfort_score",
         "comfort_rms_vertical_acc",
         "comfort_rms_lateral_acc",
@@ -3563,6 +4244,9 @@ def main(args: argparse.Namespace) -> None:
         "seeds": seeds,
         "scenarios": scenarios,
         "pid_config": expand_path(args.pid_config) if args.pid_config else "",
+        "skyhook_estimator_dryrun_config": (
+            expand_path(args.skyhook_estimator_dryrun_config)
+            if args.skyhook_estimator_dryrun_config else ""),
         "planning_provider": args.planning_provider,
         "planning_preview_jsonl": (
             expand_path(args.planning_preview_jsonl)
@@ -3679,7 +4363,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "target_speed_schedule_shadow,"
         "target_speed_schedule_v0_safe,"
         "skyhook_roll,"
-        "skyhook_roll_yaw "
+        "skyhook_roll_yaw,"
+        "skyhook_estimator_dryrun "
         "(default: stock,identity,pid)")
     parser.add_argument(
         "--baseline-scenario",
@@ -3702,6 +4387,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--skyhook-config",
         default=DEFAULT_SKYHOOK_CONFIG,
         help="flat YAML skyhook config path")
+    parser.add_argument(
+        "--skyhook-estimator-dryrun-config",
+        default=DEFAULT_SKYHOOK_ESTIMATOR_DRYRUN_CONFIG,
+        help="flat YAML skyhook estimator dry-run config path")
     parser.add_argument(
         "--skyhook-roll-config",
         default=DEFAULT_SKYHOOK_ROLL_CONFIG,

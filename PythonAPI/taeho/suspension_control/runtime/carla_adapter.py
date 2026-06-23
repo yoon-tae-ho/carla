@@ -6,7 +6,7 @@ import glob
 import math
 import os
 import sys
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 from ..controllers.base import SuspensionCommand, VehicleState
 
@@ -158,6 +158,86 @@ def finite_or_raise(values, label: str) -> None:
     for name, value in values:
         if isinstance(value, (int, float)) and not math.isfinite(value):
             raise RuntimeError("%s has non-finite %s=%r" % (label, name, value))
+
+
+def native_spring_strength_by_wheel(native_control: Any) -> Tuple[float, ...]:
+    return tuple(
+        float(getattr(wheel, "spring_strength"))
+        for wheel in tuple(getattr(native_control, "wheels", ()) or ()))
+
+
+def native_damper_rate_by_wheel(native_control: Any) -> Tuple[float, ...]:
+    return tuple(
+        float(getattr(wheel, "spring_damper_rate"))
+        for wheel in tuple(getattr(native_control, "wheels", ()) or ()))
+
+
+def suspension_state_invalid_reason(
+    state: Any,
+    expected_wheels: Optional[int] = None,
+    require_velocity: bool = True,
+    require_contact: bool = True,
+) -> str:
+    if state is None:
+        return "suspension_state_missing"
+    if not bool(getattr(state, "state_valid", False)):
+        return str(getattr(state, "failure_reason", "") or "state_valid_false")
+    wheels = tuple(getattr(state, "wheels", ()) or ())
+    if expected_wheels is not None and len(wheels) != int(expected_wheels):
+        return "wheel_count_%d_expected_%d" % (len(wheels), int(expected_wheels))
+    if not wheels:
+        return "wheel_state_empty"
+    if require_velocity and not bool(getattr(state, "velocity_valid", False)):
+        return "state_velocity_valid_false"
+    for index, wheel in enumerate(wheels):
+        if not bool(getattr(wheel, "field_valid", False)):
+            return "wheel_%d_field_valid_false" % index
+        if require_velocity and not bool(getattr(wheel, "velocity_valid", False)):
+            return "wheel_%d_velocity_valid_false" % index
+        if require_contact and not bool(getattr(wheel, "contact_valid", False)):
+            return "wheel_%d_contact_valid_false" % index
+        if require_contact and bool(getattr(wheel, "wheel_in_air", False)):
+            return "wheel_%d_in_air" % index
+        for field in (
+                "raw_suspension_offset_m",
+                "suspension_compression_m",
+                "suspension_travel_m"):
+            value = getattr(wheel, field, 0.0)
+            try:
+                finite = math.isfinite(float(value))
+            except (TypeError, ValueError):
+                finite = False
+            if not finite:
+                return "wheel_%d_%s_nonfinite" % (index, field)
+        if require_velocity:
+            value = getattr(wheel, "suspension_velocity_mps", 0.0)
+            try:
+                finite = math.isfinite(float(value))
+            except (TypeError, ValueError):
+                finite = False
+            if not finite:
+                return "wheel_%d_suspension_velocity_mps_nonfinite" % index
+    return ""
+
+
+def read_suspension_state(
+    vehicle: Any,
+    expected_wheels: Optional[int] = None,
+    require_velocity: bool = True,
+    require_contact: bool = True,
+) -> Tuple[Any, bool, str]:
+    if not hasattr(vehicle, "get_suspension_state"):
+        return None, False, "get_suspension_state_missing"
+    try:
+        state = vehicle.get_suspension_state()
+    except Exception as error:
+        return None, False, "get_suspension_state_%s" % error.__class__.__name__
+    reason = suspension_state_invalid_reason(
+        state,
+        expected_wheels=expected_wheels,
+        require_velocity=require_velocity,
+        require_contact=require_contact)
+    return state, reason == "", reason
 
 
 def validate_suspension_control(control: Any, expected_wheels: int = 4) -> None:

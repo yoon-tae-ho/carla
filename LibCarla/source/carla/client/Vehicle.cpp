@@ -108,6 +108,10 @@ namespace client {
     return GetEpisode().Lock()->GetVehicleSuspensionPhysicsControl(*this);
   }
 
+  Vehicle::SuspensionState Vehicle::GetSuspensionState() const {
+    return GetEpisode().Lock()->GetVehicleSuspensionState(*this);
+  }
+
   Vehicle::LightState Vehicle::GetLightState() const {
     return GetEpisode().Lock()->GetVehicleLightState(*this).GetLightStateEnum();
   }

@@ -250,6 +250,11 @@ public:
     return ECarlaServerResponse::NotAVehicle;
   }
 
+  virtual ECarlaServerResponse GetSuspensionState(FSuspensionState&)
+  {
+    return ECarlaServerResponse::NotAVehicle;
+  }
+
   virtual ECarlaServerResponse GetFailureState(carla::rpc::VehicleFailureState&)
   {
     return ECarlaServerResponse::ActorTypeMismatch;
@@ -496,6 +501,9 @@ public:
 
   virtual ECarlaServerResponse GetSuspensionPhysicsControl(
       FSuspensionPhysicsControl& SuspensionPhysicsControl) final;
+
+  virtual ECarlaServerResponse GetSuspensionState(
+      FSuspensionState& SuspensionState) final;
 
   virtual ECarlaServerResponse GetFailureState(carla::rpc::VehicleFailureState&) final;
 

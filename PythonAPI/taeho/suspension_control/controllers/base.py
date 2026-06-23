@@ -395,6 +395,11 @@ class ControllerContext:
     planning: PlanningInfo = field(default_factory=PlanningInfo.empty)
     native_suspension: Any = None
     current_suspension: Any = None
+    suspension_state: Any = None
+    suspension_state_valid: bool = False
+    suspension_state_invalid_reason: str = ""
+    native_spring_strength_by_wheel: Tuple[float, ...] = ()
+    native_damper_rate_by_wheel: Tuple[float, ...] = ()
     step: int = 0
     dt: float = 0.05
 

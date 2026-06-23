@@ -686,6 +686,26 @@ ECarlaServerResponse FVehicleActor::GetSuspensionPhysicsControl(
   return ECarlaServerResponse::Success;
 }
 
+ECarlaServerResponse FVehicleActor::GetSuspensionState(
+    FSuspensionState& SuspensionState)
+{
+  if (IsDormant())
+  {
+    return ECarlaServerResponse::FunctionNotAvailiableWhenDormant;
+  }
+
+  auto Vehicle = Cast<ACarlaWheeledVehicle>(GetActor());
+  if (Vehicle == nullptr)
+  {
+    return ECarlaServerResponse::NotAVehicle;
+  }
+
+  SuspensionState = Vehicle->GetSuspensionState();
+  SuspensionState.ActorId = static_cast<int32>(GetActorId());
+
+  return ECarlaServerResponse::Success;
+}
+
 ECarlaServerResponse FVehicleActor::GetFailureState(carla::rpc::VehicleFailureState& FailureState)
 {
   if (IsDormant())

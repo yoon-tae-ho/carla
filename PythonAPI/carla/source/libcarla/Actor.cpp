@@ -185,6 +185,7 @@ void export_actor() {
       .def("get_physics_control", CONST_CALL_WITHOUT_GIL(cc::Vehicle, GetPhysicsControl))
       .def("apply_suspension_physics_control", &cc::Vehicle::ApplySuspensionPhysicsControl, (arg("suspension_physics_control")))
       .def("get_suspension_physics_control", CONST_CALL_WITHOUT_GIL(cc::Vehicle, GetSuspensionPhysicsControl))
+      .def("get_suspension_state", CONST_CALL_WITHOUT_GIL(cc::Vehicle, GetSuspensionState))
       .def("apply_ackermann_controller_settings", &cc::Vehicle::ApplyAckermannControllerSettings, (arg("settings")))
       .def("get_ackermann_controller_settings", CONST_CALL_WITHOUT_GIL(cc::Vehicle, GetAckermannControllerSettings))
       .def("set_autopilot", CALL_WITHOUT_GIL_2(cc::Vehicle, SetAutopilot, bool, uint16_t), (arg("enabled") = true, arg("tm_port") = ctm::TM_DEFAULT_PORT))

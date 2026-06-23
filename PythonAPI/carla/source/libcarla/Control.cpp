@@ -9,7 +9,9 @@
 #include <carla/rpc/VehicleControl.h>
 #include <carla/rpc/VehiclePhysicsControl.h>
 #include <carla/rpc/SuspensionPhysicsControl.h>
+#include <carla/rpc/SuspensionState.h>
 #include <carla/rpc/WheelSuspensionPhysicsControl.h>
+#include <carla/rpc/WheelSuspensionState.h>
 #include <carla/rpc/WheelPhysicsControl.h>
 #include <carla/rpc/WalkerControl.h>
 #include <carla/rpc/WalkerBoneControlIn.h>
@@ -132,6 +134,37 @@ namespace rpc {
     return out;
   }
 
+  std::ostream &operator<<(std::ostream &out, const WheelSuspensionState &state) {
+    out << "WheelSuspensionState(wheel_index_raw=" << std::to_string(state.wheel_index_raw)
+        << ", wheel_name_canonical=" << state.wheel_name_canonical
+        << ", suspension_travel_m=" << std::to_string(state.suspension_travel_m)
+        << ", raw_suspension_offset_m=" << std::to_string(state.raw_suspension_offset_m)
+        << ", suspension_compression_m=" << std::to_string(state.suspension_compression_m)
+        << ", suspension_velocity_mps=" << std::to_string(state.suspension_velocity_mps)
+        << ", normalized_travel=" << std::to_string(state.normalized_travel)
+        << ", contact_valid=" << boolalpha(state.contact_valid)
+        << ", wheel_in_air=" << boolalpha(state.wheel_in_air)
+        << ", velocity_valid=" << boolalpha(state.velocity_valid)
+        << ", normalized_tire_load_valid=" << boolalpha(state.normalized_tire_load_valid)
+        << ", normalized_tire_load=" << std::to_string(state.normalized_tire_load)
+        << ", field_valid=" << boolalpha(state.field_valid) << ')';
+    return out;
+  }
+
+  std::ostream &operator<<(std::ostream &out, const SuspensionState &state) {
+    out << "SuspensionState(frame=" << std::to_string(state.frame)
+        << ", timestamp=" << std::to_string(state.timestamp)
+        << ", actor_id=" << std::to_string(state.actor_id)
+        << ", wheel_count=" << std::to_string(state.wheel_count)
+        << ", state_source=" << state.state_source
+        << ", failure_reason=" << state.failure_reason
+        << ", state_valid=" << boolalpha(state.state_valid)
+        << ", velocity_valid=" << boolalpha(state.velocity_valid)
+        << ", compression_convention_validated=" << boolalpha(state.compression_convention_validated)
+        << ", wheels=" << state.wheels << ')';
+    return out;
+  }
+
   std::ostream &operator<<(std::ostream &out, const AckermannControllerSettings &settings) {
     out << "AckermannControllerSettings(speed_kp=" << std::to_string(settings.speed_kp)
         << ", speed_ki=" << std::to_string(settings.speed_ki)
@@ -214,6 +247,14 @@ static void SetSuspensionWheels(
     wheels.push_back(boost::python::extract<carla::rpc::WheelSuspensionPhysicsControl &>(list[i]));
   }
   self.wheels = wheels;
+}
+
+static auto GetSuspensionStateWheels(const carla::rpc::SuspensionState &self) {
+  const auto &wheels = self.GetWheels();
+  boost::python::object get_iter =
+      boost::python::iterator<std::vector<carla::rpc::WheelSuspensionState>>();
+  boost::python::object iter = get_iter(wheels);
+  return boost::python::list(iter);
 }
 
 static auto GetForwardGears(const carla::rpc::VehiclePhysicsControl &self) {
@@ -568,6 +609,48 @@ void export_control() {
     .add_property("wheels", &GetSuspensionWheels, &SetSuspensionWheels)
     .def("__eq__", &cr::SuspensionPhysicsControl::operator==)
     .def("__ne__", &cr::SuspensionPhysicsControl::operator!=)
+    .def(self_ns::str(self_ns::self))
+  ;
+
+  class_<std::vector<cr::WheelSuspensionState>>("vector_of_suspension_state_wheels")
+    .def(boost::python::vector_indexing_suite<std::vector<cr::WheelSuspensionState>>())
+    .def(self_ns::str(self_ns::self))
+  ;
+
+  class_<cr::WheelSuspensionState>("WheelSuspensionState")
+    .def(init<>())
+    .def_readwrite("wheel_index_raw", &cr::WheelSuspensionState::wheel_index_raw)
+    .def_readwrite("wheel_name_canonical", &cr::WheelSuspensionState::wheel_name_canonical)
+    .def_readwrite("suspension_travel_m", &cr::WheelSuspensionState::suspension_travel_m)
+    .def_readwrite("raw_suspension_offset_m", &cr::WheelSuspensionState::raw_suspension_offset_m)
+    .def_readwrite("suspension_compression_m", &cr::WheelSuspensionState::suspension_compression_m)
+    .def_readwrite("suspension_velocity_mps", &cr::WheelSuspensionState::suspension_velocity_mps)
+    .def_readwrite("normalized_travel", &cr::WheelSuspensionState::normalized_travel)
+    .def_readwrite("contact_valid", &cr::WheelSuspensionState::contact_valid)
+    .def_readwrite("wheel_in_air", &cr::WheelSuspensionState::wheel_in_air)
+    .def_readwrite("velocity_valid", &cr::WheelSuspensionState::velocity_valid)
+    .def_readwrite("normalized_tire_load_valid", &cr::WheelSuspensionState::normalized_tire_load_valid)
+    .def_readwrite("normalized_tire_load", &cr::WheelSuspensionState::normalized_tire_load)
+    .def_readwrite("field_valid", &cr::WheelSuspensionState::field_valid)
+    .def("__eq__", &cr::WheelSuspensionState::operator==)
+    .def("__ne__", &cr::WheelSuspensionState::operator!=)
+    .def(self_ns::str(self_ns::self))
+  ;
+
+  class_<cr::SuspensionState>("SuspensionState")
+    .def(init<>())
+    .def_readwrite("frame", &cr::SuspensionState::frame)
+    .def_readwrite("timestamp", &cr::SuspensionState::timestamp)
+    .def_readwrite("actor_id", &cr::SuspensionState::actor_id)
+    .def_readwrite("wheel_count", &cr::SuspensionState::wheel_count)
+    .def_readwrite("state_source", &cr::SuspensionState::state_source)
+    .def_readwrite("failure_reason", &cr::SuspensionState::failure_reason)
+    .def_readwrite("state_valid", &cr::SuspensionState::state_valid)
+    .def_readwrite("velocity_valid", &cr::SuspensionState::velocity_valid)
+    .def_readwrite("compression_convention_validated", &cr::SuspensionState::compression_convention_validated)
+    .add_property("wheels", &GetSuspensionStateWheels)
+    .def("__eq__", &cr::SuspensionState::operator==)
+    .def("__ne__", &cr::SuspensionState::operator!=)
     .def(self_ns::str(self_ns::self))
   ;
 

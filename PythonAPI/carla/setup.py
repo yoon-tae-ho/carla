@@ -9,8 +9,49 @@
 from setuptools import setup, Extension
 
 import fnmatch
+import glob
 import os
 import sys
+
+def get_host_libstdcxx_flags():
+    compile_args = []
+    link_args = []
+    library_dirs = []
+
+    for version in ['12', '11', '10', '9']:
+        include_dir = '/usr/include/c++/%s' % version
+        arch_include_dir = '/usr/include/x86_64-linux-gnu/c++/%s' % version
+        lib_dir = '/usr/lib/gcc/x86_64-linux-gnu/%s' % version
+
+        if os.path.isdir(include_dir):
+            compile_args += ['-isystem', include_dir]
+        if os.path.isdir(arch_include_dir):
+            compile_args += ['-isystem', arch_include_dir]
+        if os.path.isfile(os.path.join(lib_dir, 'libstdc++.so')):
+            link_args += ['-L%s' % lib_dir]
+            library_dirs.append(lib_dir)
+
+    return compile_args, link_args, library_dirs
+
+def get_system_library_link_arg(library_name):
+    library_dirs = [
+        '/usr/lib/x86_64-linux-gnu',
+        '/usr/lib',
+        '/lib/x86_64-linux-gnu',
+        '/lib',
+    ]
+
+    for library_dir in library_dirs:
+        library_path = os.path.join(library_dir, 'lib%s.so' % library_name)
+        if os.path.exists(library_path):
+            return '-l%s' % library_name
+
+    for library_dir in library_dirs:
+        matches = sorted(glob.glob(os.path.join(library_dir, 'lib%s.so.*' % library_name)))
+        if matches:
+            return matches[-1]
+
+    return '-l%s' % library_name
 
 def is_rss_variant_enabled():
     if 'BUILD_RSS_VARIANT' in os.environ and os.environ['BUILD_RSS_VARIANT'] == 'true':
@@ -36,6 +77,9 @@ def get_libcarla_extensions():
 
         linux_distro = distro.linux_distribution()[0]
         if linux_distro.lower() in ["ubuntu", "debian", "deepin"]:
+            host_compile_args, host_link_args, host_library_dirs = get_host_libstdcxx_flags()
+            library_dirs += host_library_dirs
+
             pwd = os.path.dirname(os.path.realpath(__file__))
             pylib = "libboost_python%d%d.a" % (sys.version_info.major,
                                                sys.version_info.minor)
@@ -64,6 +108,8 @@ def get_libcarla_extensions():
                 '-DBOOST_ERROR_CODE_HEADER_ONLY', '-DLIBCARLA_WITH_PYTHON_SUPPORT',
                 '-stdlib=libstdc++'
             ]
+            extra_compile_args += host_compile_args
+            extra_link_args += host_link_args
             if is_rss_variant_enabled():
                 extra_compile_args += ['-DLIBCARLA_RSS_ENABLED']
                 extra_compile_args += ['-DLIBCARLA_PYTHON_MAJOR_' +  str(sys.version_info.major)]
@@ -92,7 +138,9 @@ def get_libcarla_extensions():
                 extra_link_args += ['-ljpeg', '-ltiff']
                 extra_compile_args += ['-DLIBCARLA_IMAGE_WITH_PNG_SUPPORT=false']
             else:
-                extra_link_args += ['-lpng', '-ljpeg', '-ltiff']
+                extra_link_args += [get_system_library_link_arg('png')]
+                extra_link_args += [get_system_library_link_arg('jpeg')]
+                extra_link_args += [get_system_library_link_arg('tiff')]
                 extra_compile_args += ['-DLIBCARLA_IMAGE_WITH_PNG_SUPPORT=true']
             # @todo Why would we need this?
             # include_dirs += ['/usr/lib/gcc/x86_64-linux-gnu/7/include']

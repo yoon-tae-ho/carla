@@ -51,6 +51,7 @@
 #include <carla/rpc/Server.h>
 #include <carla/rpc/String.h>
 #include <carla/rpc/SuspensionPhysicsControl.h>
+#include <carla/rpc/SuspensionState.h>
 #include <carla/rpc/Transform.h>
 #include <carla/rpc/Vector2D.h>
 #include <carla/rpc/Vector3D.h>
@@ -1323,6 +1324,31 @@ BIND_SYNC(is_sensor_enabled_for_ros) << [this](carla::streaming::detail::stream_
           " Actor Id: " + FString::FromInt(ActorId));
     }
     return cr::SuspensionPhysicsControl(SuspensionPhysicsControl);
+  };
+
+  BIND_SYNC(get_suspension_state) << [this](
+      cr::ActorId ActorId) -> R<cr::SuspensionState>
+  {
+    REQUIRE_CARLA_EPISODE();
+    FCarlaActor* CarlaActor = Episode->FindCarlaActor(ActorId);
+    if (!CarlaActor)
+    {
+      return RespondError(
+          "get_suspension_state",
+          ECarlaServerResponse::ActorNotFound,
+          " Actor Id: " + FString::FromInt(ActorId));
+    }
+    FSuspensionState SuspensionState;
+    ECarlaServerResponse Response =
+        CarlaActor->GetSuspensionState(SuspensionState);
+    if (Response != ECarlaServerResponse::Success)
+    {
+      return RespondError(
+          "get_suspension_state",
+          Response,
+          " Actor Id: " + FString::FromInt(ActorId));
+    }
+    return cr::SuspensionState(SuspensionState);
   };
 
   BIND_SYNC(get_vehicle_light_state) << [this](

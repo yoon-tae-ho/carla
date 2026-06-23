@@ -19,6 +19,7 @@
 #include "VehicleWheel.h"
 
 #include "Carla.h"
+#include "Carla/Game/CarlaEngine.h"
 #include "Carla/Game/CarlaHUD.h"
 #include "Carla/Game/CarlaStatics.h"
 #include "Carla/Trigger/FrictionTrigger.h"
@@ -52,6 +53,7 @@ ACarlaWheeledVehicle::~ACarlaWheeledVehicle() {}
 namespace {
 
 constexpr int32 RuntimeSuspensionWheelCount = 4;
+constexpr float UnrealCentimetersToMeters = 0.01f;
 
 FWheelSuspensionPhysicsControl MakeWheelSuspensionPhysicsControl(
     const PxVehicleSuspensionData &SuspensionData)
@@ -78,6 +80,150 @@ bool IsFiniteSuspensionValue(float Value, const TCHAR *Name, int32 WheelIndex)
     return false;
   }
   return true;
+}
+
+FString GetCanonicalSuspensionWheelName(int32 WheelIndex)
+{
+  switch (WheelIndex)
+  {
+    case 0:
+      return TEXT("FL");
+    case 1:
+      return TEXT("FR");
+    case 2:
+      return TEXT("RL");
+    case 3:
+      return TEXT("RR");
+    default:
+      return TEXT("UNKNOWN");
+  }
+}
+
+bool IsFiniteSuspensionStateValue(float Value)
+{
+  return FMath::IsFinite(Value);
+}
+
+void MarkSuspensionStateInvalid(FSuspensionState &State, const FString &Reason)
+{
+  State.bStateValid = false;
+  State.FailureReason = Reason;
+  UE_LOG(LogCarla, Warning, TEXT("Invalid SuspensionState: %s"), *Reason);
+}
+
+template <typename VehicleMovementT>
+bool FillSuspensionStateFromMovement(
+    const VehicleMovementT *VehicleMovement,
+    FSuspensionState &State,
+    bool bCanComputeVelocity,
+    float DeltaSeconds,
+    const TArray<float> &PreviousCompressionM)
+{
+  if (VehicleMovement == nullptr || VehicleMovement->PVehicle == nullptr)
+  {
+    MarkSuspensionStateInvalid(State, TEXT("missing vehicle movement or PhysX vehicle"));
+    return false;
+  }
+
+  const int32 PhysicsWheelsNum =
+      static_cast<int32>(VehicleMovement->PVehicle->mWheelsSimData.getNbWheels());
+  State.WheelCount = PhysicsWheelsNum;
+  if (PhysicsWheelsNum != RuntimeSuspensionWheelCount ||
+      VehicleMovement->Wheels.Num() != RuntimeSuspensionWheelCount)
+  {
+    MarkSuspensionStateInvalid(
+        State,
+        FString::Printf(
+            TEXT("expected %d wheels, got PhysX=%d Movement=%d"),
+            RuntimeSuspensionWheelCount,
+            PhysicsWheelsNum,
+            VehicleMovement->Wheels.Num()));
+    return false;
+  }
+
+  State.Wheels.Reset(RuntimeSuspensionWheelCount);
+  bool bAllWheelsValid = true;
+  bool bAllVelocitiesValid = bCanComputeVelocity;
+
+  for (int32 i = 0; i < RuntimeSuspensionWheelCount; ++i)
+  {
+    FWheelSuspensionState WheelState;
+    WheelState.WheelIndexRaw = i;
+    WheelState.WheelNameCanonical = GetCanonicalSuspensionWheelName(i);
+    bool bWheelFieldValid = true;
+
+    UVehicleWheel *Wheel = VehicleMovement->Wheels[i];
+    if (Wheel == nullptr)
+    {
+      WheelState.bFieldValid = false;
+      State.Wheels.Add(WheelState);
+      bAllWheelsValid = false;
+      continue;
+    }
+
+    const float RawSuspensionOffsetM =
+        Wheel->GetSuspensionOffset() * UnrealCentimetersToMeters;
+    const PxVehicleSuspensionData SuspensionData =
+        VehicleMovement->PVehicle->mWheelsSimData.getSuspensionData(i);
+    const float MaxTravelM =
+        (SuspensionData.mMaxCompression + SuspensionData.mMaxDroop) *
+        UnrealCentimetersToMeters;
+    const float NormalizedTireLoad = Wheel->DebugNormalizedTireLoad;
+
+    WheelState.RawSuspensionOffsetM = RawSuspensionOffsetM;
+    WheelState.SuspensionTravelM = RawSuspensionOffsetM;
+    WheelState.SuspensionCompressionM = RawSuspensionOffsetM;
+    WheelState.bContactValid = true;
+    WheelState.bWheelInAir = Wheel->IsInAir();
+    WheelState.NormalizedTireLoad = NormalizedTireLoad;
+    WheelState.bNormalizedTireLoadValid = IsFiniteSuspensionStateValue(NormalizedTireLoad);
+
+    if (IsFiniteSuspensionStateValue(MaxTravelM) && MaxTravelM > KINDA_SMALL_NUMBER)
+    {
+      WheelState.NormalizedTravel = RawSuspensionOffsetM / MaxTravelM;
+    }
+    else
+    {
+      WheelState.NormalizedTravel = 0.0f;
+      bWheelFieldValid = false;
+      bAllWheelsValid = false;
+    }
+
+    if (bCanComputeVelocity && PreviousCompressionM.IsValidIndex(i))
+    {
+      WheelState.SuspensionVelocityMps =
+          (WheelState.SuspensionCompressionM - PreviousCompressionM[i]) /
+          DeltaSeconds;
+      WheelState.bVelocityValid =
+          IsFiniteSuspensionStateValue(WheelState.SuspensionVelocityMps);
+      bAllVelocitiesValid = bAllVelocitiesValid && WheelState.bVelocityValid;
+    }
+    else
+    {
+      WheelState.SuspensionVelocityMps = 0.0f;
+      WheelState.bVelocityValid = false;
+      bAllVelocitiesValid = false;
+    }
+
+    const bool bCoreFieldsFinite =
+        IsFiniteSuspensionStateValue(WheelState.RawSuspensionOffsetM) &&
+        IsFiniteSuspensionStateValue(WheelState.SuspensionTravelM) &&
+        IsFiniteSuspensionStateValue(WheelState.SuspensionCompressionM) &&
+        IsFiniteSuspensionStateValue(WheelState.SuspensionVelocityMps) &&
+        IsFiniteSuspensionStateValue(WheelState.NormalizedTravel);
+    WheelState.bFieldValid = bWheelFieldValid && bCoreFieldsFinite;
+    bAllWheelsValid = bAllWheelsValid && WheelState.bFieldValid;
+
+    State.Wheels.Add(WheelState);
+  }
+
+  State.bVelocityValid = bAllVelocitiesValid;
+  State.bStateValid = bAllWheelsValid;
+  if (!State.bStateValid && State.FailureReason.IsEmpty())
+  {
+    State.FailureReason = TEXT("one or more wheel suspension fields are invalid");
+  }
+  return State.bStateValid;
 }
 
 bool IsValidSuspensionWheelControl(
@@ -717,6 +863,75 @@ FSuspensionPhysicsControl ACarlaWheeledVehicle::GetSuspensionPhysicsControl() co
   }
 
   return Control;
+}
+
+FSuspensionState ACarlaWheeledVehicle::GetSuspensionState() const
+{
+  FSuspensionState State;
+  State.Frame = static_cast<int64>(FCarlaEngine::GetFrameCounter());
+  State.StateSource = TEXT("UVehicleWheel::GetSuspensionOffset");
+  State.bCompressionConventionValidated = false;
+
+  UWorld *World = GetWorld();
+  if (World == nullptr)
+  {
+    MarkSuspensionStateInvalid(State, TEXT("missing world"));
+    bSuspensionStateVelocityCacheValid = false;
+    return State;
+  }
+
+  const UCarlaEpisode *Episode = UCarlaStatics::GetCurrentEpisode(this);
+  State.Timestamp = Episode != nullptr ?
+      static_cast<float>(Episode->GetElapsedGameTime()) :
+      World->GetTimeSeconds();
+
+  const float DeltaSeconds =
+      State.Timestamp - SuspensionStateVelocityCacheTimestamp;
+  const bool bCanComputeVelocity =
+      bSuspensionStateVelocityCacheValid &&
+      SuspensionStateVelocityCacheCompressionM.Num() == RuntimeSuspensionWheelCount &&
+      State.Frame > SuspensionStateVelocityCacheFrame &&
+      IsFiniteSuspensionStateValue(DeltaSeconds) &&
+      DeltaSeconds > KINDA_SMALL_NUMBER;
+
+  if (!bIsNWVehicle) {
+    const UWheeledVehicleMovementComponent4W *Vehicle4W =
+        Cast<UWheeledVehicleMovementComponent4W>(GetVehicleMovement());
+    FillSuspensionStateFromMovement(
+        Vehicle4W,
+        State,
+        bCanComputeVelocity,
+        DeltaSeconds,
+        SuspensionStateVelocityCacheCompressionM);
+  } else {
+    const UWheeledVehicleMovementComponentNW *VehicleNW =
+        Cast<UWheeledVehicleMovementComponentNW>(GetVehicleMovement());
+    FillSuspensionStateFromMovement(
+        VehicleNW,
+        State,
+        bCanComputeVelocity,
+        DeltaSeconds,
+        SuspensionStateVelocityCacheCompressionM);
+  }
+
+  if (State.bStateValid && State.Wheels.Num() == RuntimeSuspensionWheelCount)
+  {
+    SuspensionStateVelocityCacheCompressionM.Reset(RuntimeSuspensionWheelCount);
+    for (const auto &Wheel : State.Wheels)
+    {
+      SuspensionStateVelocityCacheCompressionM.Add(Wheel.SuspensionCompressionM);
+    }
+    SuspensionStateVelocityCacheFrame = State.Frame;
+    SuspensionStateVelocityCacheTimestamp = State.Timestamp;
+    bSuspensionStateVelocityCacheValid = true;
+  }
+  else
+  {
+    bSuspensionStateVelocityCacheValid = false;
+    SuspensionStateVelocityCacheCompressionM.Reset();
+  }
+
+  return State;
 }
 
 FVehicleLightState ACarlaWheeledVehicle::GetVehicleLightState() const

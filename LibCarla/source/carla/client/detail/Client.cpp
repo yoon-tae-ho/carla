@@ -17,6 +17,7 @@
 #include "carla/rpc/DebugShape.h"
 #include "carla/rpc/Response.h"
 #include "carla/rpc/SuspensionPhysicsControl.h"
+#include "carla/rpc/SuspensionState.h"
 #include "carla/rpc/VehicleAckermannControl.h"
 #include "carla/rpc/VehicleControl.h"
 #include "carla/rpc/VehicleLightState.h"
@@ -283,6 +284,13 @@ namespace detail {
       rpc::ActorId vehicle) const {
     return _pimpl->CallAndWait<carla::rpc::SuspensionPhysicsControl>(
         "get_suspension_physics_control",
+        vehicle);
+  }
+
+  rpc::SuspensionState Client::GetVehicleSuspensionState(
+      rpc::ActorId vehicle) const {
+    return _pimpl->CallAndWait<carla::rpc::SuspensionState>(
+        "get_suspension_state",
         vehicle);
   }
 

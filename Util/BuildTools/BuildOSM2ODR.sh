@@ -49,6 +49,19 @@ done
 
 source $(dirname "$0")/Environment.sh
 
+HOST_LIBSTDCPP_FLAGS=""
+for STDCPP_VERSION in 12 11 10 9; do
+  if [ -d "/usr/include/c++/${STDCPP_VERSION}" ]; then
+    HOST_LIBSTDCPP_FLAGS="${HOST_LIBSTDCPP_FLAGS} -isystem /usr/include/c++/${STDCPP_VERSION}"
+  fi
+  if [ -d "/usr/include/x86_64-linux-gnu/c++/${STDCPP_VERSION}" ]; then
+    HOST_LIBSTDCPP_FLAGS="${HOST_LIBSTDCPP_FLAGS} -isystem /usr/include/x86_64-linux-gnu/c++/${STDCPP_VERSION}"
+  fi
+  if [ -f "/usr/lib/gcc/x86_64-linux-gnu/${STDCPP_VERSION}/libstdc++.so" ]; then
+    HOST_LIBSTDCPP_FLAGS="${HOST_LIBSTDCPP_FLAGS} -L/usr/lib/gcc/x86_64-linux-gnu/${STDCPP_VERSION}"
+  fi
+done
+
 function get_source_code_checksum {
   local EXCLUDE='*__pycache__*'
   find "${OSM2ODR_SOURCE_FOLDER}"/* \! -path "${EXCLUDE}" -print0 | sha1sum | awk '{print $1}'
@@ -95,7 +108,7 @@ if ${BUILD_OSM2ODR} ; then
 
   cmake ${OSM2ODR_SOURCE_FOLDER} \
       -G "Eclipse CDT4 - Ninja" \
-      -DCMAKE_CXX_FLAGS="-stdlib=libstdc++" \
+      -DCMAKE_CXX_FLAGS="-stdlib=libstdc++ ${HOST_LIBSTDCPP_FLAGS}" \
       -DCMAKE_INSTALL_PREFIX=${LIBCARLA_INSTALL_CLIENT_FOLDER} \
       -DPROJ_INCLUDE_DIR=${CARLA_BUILD_FOLDER}/proj-install/include \
       -DPROJ_LIBRARY=${CARLA_BUILD_FOLDER}/proj-install/lib/libproj.a \

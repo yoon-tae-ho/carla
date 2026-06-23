@@ -1,17 +1,37 @@
 # Default config for controllers.skyhook.SkyhookController.
-# Keys intentionally match SkyhookConfig fields.
 
+controller_version: skyhook_v2_state_strict
 default_dt: 0.05
 wheel_count: 4
 
-# Spring is frozen at identity scale inside SkyhookController.
-base_damper_scale: 1.0
-min_damper_scale: 0.80
-max_damper_scale: 1.30
-max_damper_delta_per_step: 0.04
-
-half_track_m: 0.85
+# Geometry fallback. VehicleState angles are degrees and actor angular velocity
+# is converted from deg/s to rad/s inside the controller by default.
 half_wheelbase_m: 1.45
-corner_velocity_scale: 1.0
-corner_velocity_deadband: 0.02
-skyhook_gain: 0.25
+half_track_m: 0.85
+front_x_sign: 1.0
+left_y_sign: -1.0
+angular_velocity_source: actor_getter_deg_s
+angular_velocity_unit: deg_s
+
+# State source and strict fallback.
+require_suspension_state: true
+identity_if_any_wheel_invalid: true
+require_contact_valid: true
+require_velocity: true
+relative_extension_sign: -1.0
+
+# Damper-only projected-force skyhook law.
+skyhook_law: projected_force
+skyhook_c_scale: 1.0
+neutral_damper_scale: 1.0
+low_damper_scale: 0.82
+high_damper_scale: 1.22
+min_damper_scale: 0.75
+max_damper_scale: 1.25
+max_damper_delta_per_step: 0.035
+
+# Deadbands and safety.
+sprung_velocity_deadband: 0.025
+rel_velocity_deadband: 0.015
+product_deadband: 0.0005
+projection_eps: 0.000001

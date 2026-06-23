@@ -17,6 +17,7 @@
 #include "Vehicle/VehicleInputPriority.h"
 #include "Vehicle/VehiclePhysicsControl.h"
 #include "Vehicle/SuspensionPhysicsControl.h"
+#include "Vehicle/SuspensionState.h"
 #include "VehicleVelocityControl.h"
 #include "WheeledVehicleMovementComponent4W.h"
 #include "WheeledVehicleMovementComponentNW.h"
@@ -168,6 +169,9 @@ public:
 
   UFUNCTION(Category = "CARLA Wheeled Vehicle", BlueprintCallable)
   FSuspensionPhysicsControl GetSuspensionPhysicsControl() const;
+
+  UFUNCTION(Category = "CARLA Wheeled Vehicle", BlueprintCallable)
+  FSuspensionState GetSuspensionState() const;
 
   UFUNCTION(Category = "CARLA Wheeled Vehicle", BlueprintCallable)
   FAckermannControllerSettings GetAckermannControllerSettings() const {
@@ -359,6 +363,11 @@ private:
   float RolloverFlagTime = 5.0f;
 
   carla::rpc::VehicleFailureState FailureState = carla::rpc::VehicleFailureState::None;
+
+  mutable bool bSuspensionStateVelocityCacheValid = false;
+  mutable int64 SuspensionStateVelocityCacheFrame = -1;
+  mutable float SuspensionStateVelocityCacheTimestamp = 0.0f;
+  mutable TArray<float> SuspensionStateVelocityCacheCompressionM;
 
 public:
   UPROPERTY(Category = "CARLA Wheeled Vehicle", EditDefaultsOnly)

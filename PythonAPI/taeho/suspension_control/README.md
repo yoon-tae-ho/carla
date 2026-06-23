@@ -13,6 +13,7 @@ suspension_control/
   runtime/       CARLA adapters, loop helpers, and observers.
   metrics/       Stability and comfort summaries for profile rows.
   configs/       Human-readable defaults for controller experiments.
+  tools/         Read-only inspection and validation utilities.
 ```
 
 ## Controller Contract
@@ -61,3 +62,26 @@ loop.restore_native()
 
 The loop assumes synchronous CARLA ticking, matching the existing suspension
 experiments.
+
+## Suspension State Inspection
+
+`tools/inspect_suspension_state.py` validates the Python-facing
+`vehicle.get_suspension_state()` API before any controller consumes the new
+state. It attaches to a running CARLA world, finds the hero vehicle, waits for
+external ticks or polls by wall-clock sleep, and writes per-wheel CSV rows. It
+does not apply suspension commands and does not advance the world.
+
+Example:
+
+```bash
+python carla-0.9.15/PythonAPI/taeho/suspension_control/tools/inspect_suspension_state.py \
+  --role-name hero \
+  --duration-sec 10 \
+  --output /tmp/suspension_state.csv \
+  --report-output markdown/for_carla/semiactive_suspension_state_skyhook_v5_steps/PR1_RUNTIME_VALIDATION_REPORT.md \
+  --print-summary
+```
+
+The CSV includes raw suspension offset, provisional compression, finite-
+difference velocity, contact validity, `wheel_in_air`, normalized tire load
+fields, and empty force columns reserved for future backend exposure.
