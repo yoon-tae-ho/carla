@@ -3885,6 +3885,8 @@ def run_scenario(
 
     row: Dict[str, Any] = {
         "seed": seed,
+        "routes_subset": args.routes_subset,
+        "route_id": args.routes_subset,
         "scenario": scenario["name"],
         "label": scenario["label"],
         "controller": scenario["controller"],
@@ -4238,6 +4240,7 @@ def main(args: argparse.Namespace) -> None:
         "port": args.port,
         "routes": expand_path(args.routes),
         "routes_subset": args.routes_subset,
+        "lead_checkpoint": getattr(args, "lead_checkpoint", ""),
         "repetitions": args.repetitions,
         "metric_warmup_seconds": args.metric_warmup_seconds,
         "steady_fraction": args.steady_fraction,

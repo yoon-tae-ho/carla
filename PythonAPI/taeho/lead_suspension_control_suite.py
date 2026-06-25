@@ -44,6 +44,14 @@ DEFAULT_LEAD_ROUTES = os.path.join(
 DEFAULT_LEAD_SUITE_ROOT = os.path.join(
     E2E_ROOT, "outputs", "lead", "suspension_suite")
 DEFAULT_LEAD_PROJECT_ROOT = os.path.join(E2E_ROOT, "lead")
+DEFAULT_LEAD_CHECKPOINT = os.environ.get(
+    "LEAD_DEFAULT_CHECKPOINT",
+    os.path.join(
+        DEFAULT_LEAD_PROJECT_ROOT,
+        "outputs",
+        "checkpoints",
+        "tfv6_regnety032",
+    ))
 
 
 _ORIGINAL_RUN_ENV = suite.run_env
@@ -111,6 +119,10 @@ def lead_run_env(
     env["SIM_ROOT"] = sim_root
     env["E2E_ROOT"] = e2e_root
     env["LEAD_PROJECT_ROOT"] = lead_project_root
+    lead_checkpoint = getattr(args, "lead_checkpoint", "") or env.get(
+        "LEAD_CHECKPOINT",
+        DEFAULT_LEAD_CHECKPOINT)
+    env["LEAD_CHECKPOINT"] = _expand_path(lead_checkpoint)
     env["LEAD_ROUTE"] = _expand_path(args.routes)
     env["LEAD_OUTPUT_DIR"] = lead_output_dir
     env["LEAD_PORT"] = str(args.port)
@@ -201,6 +213,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--preflight-only",
         action="store_true",
         help="run LEAD sidecar CARLA import preflight and exit")
+    parser.add_argument(
+        "--lead-checkpoint",
+        default=DEFAULT_LEAD_CHECKPOINT,
+        help="LEAD checkpoint directory (default: tfv6_regnety032)")
     parser.set_defaults(
         debug=0,
         route_script=DEFAULT_LEAD_ROUTE_SCRIPT,
