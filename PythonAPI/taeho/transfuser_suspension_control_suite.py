@@ -21,6 +21,15 @@ Optional scenario:
                        log yaw-aware distribution proposal; apply S19 command
   S21_skyhook_estimator_dryrun:
                        log state-based skyhook candidates, apply identity
+  S22_constant_damper_1p02:
+                       apply ConstantScaleController with damper 1.02
+  S23_pard_v2_shadow: log PARD v2 would-command; apply identity
+  S24_pard_v2_active_ultra_safe:
+                       apply PARD v2 ultra-safe uniform damping
+  S25_pard_v2_active_safe_1p06:
+                       apply PARD v2 1.06 sensitivity config
+  S26_pard_v2_active_aggressive_0p75_1p25:
+                       apply PARD v2 centered 0.75-1.25 experimental config
 """
 
 from __future__ import annotations
@@ -57,6 +66,10 @@ from suspension_control.controllers.estimators import (
 )
 from suspension_control.controllers.identity import IdentityController
 from suspension_control.controllers.pid import FeedbackPIDConfig, FeedbackPIDController
+from suspension_control.controllers.planning_aware_risk_damping import (
+    PlanningAwareRiskDampingConfig,
+    PlanningAwareRiskDampingController,
+)
 from suspension_control.controllers.rl_residual import (
     ResidualRLConfig,
     ResidualRLController,
@@ -125,6 +138,8 @@ DEFAULT_SKYHOOK_ROLL_YAW_CONFIG = os.path.join(
     SCRIPT_DIR, "suspension_control", "configs", "skyhook_roll_yaw.yaml")
 DEFAULT_CONSTANT_SCALE_CONFIG = os.path.join(
     SCRIPT_DIR, "suspension_control", "configs", "constant_damper_1p03.yaml")
+DEFAULT_CONSTANT_DAMPER_1P02_CONFIG = os.path.join(
+    SCRIPT_DIR, "suspension_control", "configs", "constant_damper_1p02.yaml")
 DEFAULT_TARGET_SPEED_SCHEDULE_CONFIG = os.path.join(
     SCRIPT_DIR,
     "suspension_control",
@@ -136,6 +151,30 @@ DEFAULT_TARGET_SPEED_SCHEDULE_SAFE_CONFIG = os.path.join(
     "suspension_control",
     "configs",
     "lead_target_speed_schedule_v0_safe.yaml",
+)
+DEFAULT_PARD_V2_ULTRA_SAFE_CONFIG = os.path.join(
+    SCRIPT_DIR,
+    "suspension_control",
+    "configs",
+    "planning_aware_risk_damping_ultra_safe.yaml",
+)
+DEFAULT_PARD_V2_SHADOW_CONFIG = os.path.join(
+    SCRIPT_DIR,
+    "suspension_control",
+    "configs",
+    "planning_aware_risk_damping_shadow.yaml",
+)
+DEFAULT_PARD_V2_SAFE_1P06_CONFIG = os.path.join(
+    SCRIPT_DIR,
+    "suspension_control",
+    "configs",
+    "planning_aware_risk_damping_safe_1p06.yaml",
+)
+DEFAULT_PARD_V2_AGGRESSIVE_0P75_1P25_CONFIG = os.path.join(
+    SCRIPT_DIR,
+    "suspension_control",
+    "configs",
+    "planning_aware_risk_damping_aggressive_0p75_1p25.yaml",
 )
 DEFAULT_RL_RESIDUAL_CONFIG = os.path.join(
     SCRIPT_DIR, "suspension_control", "configs", "rl_residual.yaml")
@@ -293,7 +332,42 @@ SCENARIOS = OrderedDict((
         "uses_suspension_api": True,
         "needs_suspension_state": True,
     }),
+    ("constant_damper_1p02", {
+        "name": "S22_constant_damper_1p02",
+        "label": "S22 constant damper 1.02",
+        "controller": "constant_scale_1p02",
+        "uses_suspension_api": True,
+    }),
+    ("pard_v2_shadow", {
+        "name": "S23_pard_v2_shadow",
+        "label": "S23 PARD v2 shadow",
+        "controller": "planning_aware_risk_damping_shadow",
+        "uses_suspension_api": True,
+    }),
+    ("pard_v2_active_ultra_safe", {
+        "name": "S24_pard_v2_active_ultra_safe",
+        "label": "S24 PARD v2 active ultra-safe",
+        "controller": "planning_aware_risk_damping_ultra_safe",
+        "uses_suspension_api": True,
+    }),
+    ("pard_v2_active_safe_1p06", {
+        "name": "S25_pard_v2_active_safe_1p06",
+        "label": "S25 PARD v2 active safe 1.06",
+        "controller": "planning_aware_risk_damping_safe_1p06",
+        "uses_suspension_api": True,
+    }),
+    ("pard_v2_active_aggressive_0p75_1p25", {
+        "name": "S26_pard_v2_active_aggressive_0p75_1p25",
+        "label": "S26 PARD v2 active aggressive 0.75-1.25",
+        "controller": "planning_aware_risk_damping_aggressive_0p75_1p25",
+        "uses_suspension_api": True,
+    }),
 ))
+
+SCENARIO_ALIASES = {
+    "pard_v2": "pard_v2_active_ultra_safe",
+    "planning_risk_damping": "pard_v2_active_ultra_safe",
+}
 
 
 STATE_FIELD_NAMES = (
@@ -354,6 +428,87 @@ EVENT_FIELDS = (
 )
 
 WHEEL_DIAGNOSTIC_LABELS = ("fl", "fr", "rl", "rr")
+
+PARD_V2_DIAGNOSTIC_FIELDS = (
+    "controller_name",
+    "shadow_mode",
+    "output_mode",
+    "damper_schedule_mode",
+    "planning_valid",
+    "planning_horizon_dt",
+    "fallback_active",
+    "fallback_reason",
+    "suspension_state_available",
+    "preview_points_used",
+    "motion_gate",
+    "curvature_source",
+    "curvature_abs_max",
+    "curvature_abs_near_topk",
+    "predicted_ay_source",
+    "predicted_ay_abs_max",
+    "predicted_ay_abs_near_topk",
+    "predicted_ax_min",
+    "brake_preview_max",
+    "target_speed_min_1s",
+    "target_speed_drop_1s",
+    "steer_preview_abs_max",
+    "risk_source_mask",
+    "risk_confidence",
+    "r_ay_preview",
+    "r_kappa_preview",
+    "r_steer_preview",
+    "r_lat_preview",
+    "r_state_ay",
+    "r_roll_rate",
+    "r_roll_angle",
+    "r_yaw_rate",
+    "r_state_raw",
+    "r_state_trim",
+    "r_pred_decel",
+    "r_brake_preview",
+    "r_current_brake",
+    "r_speed_drop",
+    "r_brake_preview_combined",
+    "risk_preview",
+    "risk_raw",
+    "risk_smooth",
+    "r_lat_smooth",
+    "r_brake_smooth",
+    "uniform_damper_desired",
+    "uniform_damper_limited",
+    "uniform_damper_cmd",
+    "uniform_damper_would",
+    "front_damper_cmd",
+    "rear_damper_cmd",
+    "front_damper_would",
+    "rear_damper_would",
+    "rate_limit_active_uniform",
+    "rate_limit_active_front",
+    "rate_limit_active_rear",
+    "event_held",
+    "spring_FL",
+    "spring_FR",
+    "spring_RL",
+    "spring_RR",
+    "damper_FL",
+    "damper_FR",
+    "damper_RL",
+    "damper_RR",
+    "bbox_num_boxes",
+    "bbox_num_vehicle_boxes",
+    "bbox_num_pedestrian_boxes",
+    "bbox_min_forward_distance_m",
+    "state_speed",
+    "state_local_ay",
+    "state_roll",
+    "state_roll_rate",
+    "state_pitch",
+    "state_pitch_rate",
+    "state_yaw_rate",
+    "state_steer",
+    "state_brake",
+    "exception_type",
+)
 
 SUSPENSION_STATE_DIAGNOSTIC_FIELDS = (
     "controller_version",
@@ -589,6 +744,7 @@ DIAGNOSTIC_FIELDS = (
     "tss_used_curvature",
     "tss_used_trajectory",
     "tss_used_control",
+) + PARD_V2_DIAGNOSTIC_FIELDS + (
     "planning_available",
     "planning_source",
     "planning_frame",
@@ -882,6 +1038,17 @@ def build_constant_scale_config(path: str) -> ConstantScaleConfig:
     return ConstantScaleConfig()
 
 
+def build_constant_damper_1p02_config(path: str) -> ConstantScaleConfig:
+    values: Dict[str, Any] = {
+        "spring_scale": 1.0,
+        "damper_scale": 1.02,
+        "wheel_count": 4,
+    }
+    if path and os.path.isfile(path):
+        values.update(read_flat_yaml(path))
+    return ConstantScaleConfig.from_mapping(values)
+
+
 def build_target_speed_schedule_config(path: str) -> TargetSpeedScheduleConfig:
     if path and os.path.isfile(path):
         return TargetSpeedScheduleConfig.from_mapping(read_flat_yaml(path))
@@ -899,6 +1066,57 @@ def build_target_speed_schedule_shadow_config(
         "shadow_damper_scale": 1.0,
     })
     return TargetSpeedScheduleConfig.from_mapping(values)
+
+
+def build_planning_aware_risk_damping_config(
+    path: str,
+) -> PlanningAwareRiskDampingConfig:
+    if path and os.path.isfile(path):
+        return PlanningAwareRiskDampingConfig.from_mapping(read_flat_yaml(path))
+    return PlanningAwareRiskDampingConfig()
+
+
+def build_planning_aware_risk_damping_shadow_config(
+    path: str,
+) -> PlanningAwareRiskDampingConfig:
+    values: Dict[str, Any] = {"shadow_mode": True}
+    if path and os.path.isfile(path):
+        values.update(read_flat_yaml(path))
+    values["shadow_mode"] = True
+    return PlanningAwareRiskDampingConfig.from_mapping(values)
+
+
+def build_planning_aware_risk_damping_safe_1p06_config(
+    path: str,
+) -> PlanningAwareRiskDampingConfig:
+    values: Dict[str, Any] = {
+        "shadow_mode": False,
+        "output_mode": "uniform",
+        "damper_min": 1.0,
+        "damper_max": 1.06,
+        "max_uniform_extra": 0.06,
+        "max_scale_rate_per_s": 0.12,
+    }
+    if path and os.path.isfile(path):
+        values.update(read_flat_yaml(path))
+    return PlanningAwareRiskDampingConfig.from_mapping(values)
+
+
+def build_planning_aware_risk_damping_aggressive_config(
+    path: str,
+) -> PlanningAwareRiskDampingConfig:
+    values: Dict[str, Any] = {
+        "shadow_mode": False,
+        "output_mode": "uniform",
+        "damper_schedule_mode": "centered_range",
+        "damper_min": 0.75,
+        "damper_max": 1.25,
+        "max_uniform_extra": 0.25,
+        "max_scale_rate_per_s": 0.50,
+    }
+    if path and os.path.isfile(path):
+        values.update(read_flat_yaml(path))
+    return PlanningAwareRiskDampingConfig.from_mapping(values)
 
 
 def build_rl_residual_config(
@@ -976,6 +1194,9 @@ def make_controller(controller_name: str, args: argparse.Namespace):
     if controller_name == "constant_scale":
         return ConstantScaleController(build_constant_scale_config(
             args.constant_scale_config))
+    if controller_name == "constant_scale_1p02":
+        return ConstantScaleController(build_constant_damper_1p02_config(
+            args.constant_damper_1p02_config))
     if controller_name == "target_speed_schedule":
         return TargetSpeedScheduleController(build_target_speed_schedule_config(
             args.target_speed_schedule_config))
@@ -986,6 +1207,26 @@ def make_controller(controller_name: str, args: argparse.Namespace):
     if controller_name == "target_speed_schedule_safe":
         return TargetSpeedScheduleController(build_target_speed_schedule_config(
             args.target_speed_schedule_safe_config))
+    if controller_name in (
+            "planning_aware_risk_damping",
+            "planning_aware_risk_damping_ultra_safe",
+            "pard_v2",
+            "planning_risk_damping"):
+        return PlanningAwareRiskDampingController(
+            build_planning_aware_risk_damping_config(
+                args.planning_aware_risk_damping_ultra_safe_config))
+    if controller_name == "planning_aware_risk_damping_shadow":
+        return PlanningAwareRiskDampingController(
+            build_planning_aware_risk_damping_shadow_config(
+                args.planning_aware_risk_damping_shadow_config))
+    if controller_name == "planning_aware_risk_damping_safe_1p06":
+        return PlanningAwareRiskDampingController(
+            build_planning_aware_risk_damping_safe_1p06_config(
+                args.planning_aware_risk_damping_safe_1p06_config))
+    if controller_name == "planning_aware_risk_damping_aggressive_0p75_1p25":
+        return PlanningAwareRiskDampingController(
+            build_planning_aware_risk_damping_aggressive_config(
+                args.planning_aware_risk_damping_aggressive_0p75_1p25_config))
     if controller_name == "rl_residual":
         return ResidualRLController(build_rl_residual_config(args))
     if controller_name == "rl_residual_pid":
@@ -1069,7 +1310,7 @@ def selected_scenarios(value: str) -> List[Dict[str, Any]]:
     }
     selected = []
     for name in parse_csv_list(value):
-        key = name
+        key = SCENARIO_ALIASES.get(name, name)
         if key not in SCENARIOS:
             scenario_code = name if "_" not in name else ""
             key = scenario_name_to_key.get(
@@ -4341,8 +4582,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="leaderboard repetitions per route (default: 1)")
     parser.add_argument(
         "--seeds",
-        default="100",
-        help="comma-separated traffic manager seeds (default: 100)")
+        default="111",
+        help="comma-separated traffic manager seeds (default: 111)")
     parser.add_argument(
         "--traffic-manager-port",
         default=8000,
@@ -4367,7 +4608,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "target_speed_schedule_v0_safe,"
         "skyhook_roll,"
         "skyhook_roll_yaw,"
-        "skyhook_estimator_dryrun "
+        "skyhook_estimator_dryrun,"
+        "constant_damper_1p02,"
+        "pard_v2_shadow,"
+        "pard_v2_active_ultra_safe,"
+        "pard_v2_active_safe_1p06,"
+        "pard_v2_active_aggressive_0p75_1p25 "
         "(default: stock,identity,pid)")
     parser.add_argument(
         "--baseline-scenario",
@@ -4407,6 +4653,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default=DEFAULT_CONSTANT_SCALE_CONFIG,
         help="flat YAML constant-scale config path")
     parser.add_argument(
+        "--constant-damper-1p02-config",
+        default=DEFAULT_CONSTANT_DAMPER_1P02_CONFIG,
+        help="flat YAML constant damper 1.02 config path")
+    parser.add_argument(
         "--target-speed-schedule-config",
         default=DEFAULT_TARGET_SPEED_SCHEDULE_CONFIG,
         help="flat YAML target-speed schedule config path")
@@ -4414,6 +4664,22 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--target-speed-schedule-safe-config",
         default=DEFAULT_TARGET_SPEED_SCHEDULE_SAFE_CONFIG,
         help="flat YAML safe target-speed schedule config path")
+    parser.add_argument(
+        "--planning-aware-risk-damping-ultra-safe-config",
+        default=DEFAULT_PARD_V2_ULTRA_SAFE_CONFIG,
+        help="flat YAML PARD v2 ultra-safe config path")
+    parser.add_argument(
+        "--planning-aware-risk-damping-shadow-config",
+        default=DEFAULT_PARD_V2_SHADOW_CONFIG,
+        help="flat YAML PARD v2 shadow config path")
+    parser.add_argument(
+        "--planning-aware-risk-damping-safe-1p06-config",
+        default=DEFAULT_PARD_V2_SAFE_1P06_CONFIG,
+        help="flat YAML PARD v2 safe 1.06 config path")
+    parser.add_argument(
+        "--planning-aware-risk-damping-aggressive-0p75-1p25-config",
+        default=DEFAULT_PARD_V2_AGGRESSIVE_0P75_1P25_CONFIG,
+        help="flat YAML PARD v2 aggressive 0.75-1.25 config path")
     parser.add_argument(
         "--rl-residual-config",
         default=DEFAULT_RL_RESIDUAL_CONFIG,

@@ -1,0 +1,5 @@
+# Step 2 constant-damper baseline.
+
+spring_scale: 1.0
+damper_scale: 1.02
+wheel_count: 4

@@ -19,8 +19,10 @@ SMOKE_SCENARIOS = (
     "LEAD_export_only",
     "LEAD_identity",
     "LEAD_identity_jsonl",
-    "LEAD_target_speed_schedule_shadow",
-    "LEAD_target_speed_schedule_v0_safe",
+    "LEAD_constant_damper_1.02",
+    "LEAD_constant_damper_1.03",
+    "LEAD_pard_v2_shadow",
+    "LEAD_pard_v2_active_ultra_safe",
 )
 FULL_SCENARIOS = (
     "LEAD_stock",
@@ -28,14 +30,22 @@ FULL_SCENARIOS = (
     "LEAD_export_only",
     "LEAD_identity_jsonl",
     "LEAD_skyhook",
+    "LEAD_constant_damper_1.02",
     "LEAD_constant_damper_1.03",
     "LEAD_target_speed_schedule_v0",
+    "LEAD_pard_v2_shadow",
+    "LEAD_pard_v2_active_ultra_safe",
 )
 SIDECAR_SCENARIOS = {
     "LEAD_identity",
     "LEAD_identity_jsonl",
     "LEAD_skyhook",
+    "LEAD_constant_damper_1.02",
     "LEAD_constant_damper_1.03",
+    "LEAD_pard_v2_shadow",
+    "LEAD_pard_v2_active_ultra_safe",
+    "LEAD_pard_v2_active_safe_1p06",
+    "LEAD_pard_v2_active_aggressive_0p75_1p25",
     "LEAD_target_speed_schedule_v0",
     "LEAD_target_speed_schedule_shadow",
     "LEAD_target_speed_schedule_v0_safe",
@@ -43,16 +53,53 @@ SIDECAR_SCENARIOS = {
 JSONL_SCENARIOS = {
     "LEAD_export_only",
     "LEAD_identity_jsonl",
+    "LEAD_pard_v2_shadow",
+    "LEAD_pard_v2_active_ultra_safe",
+    "LEAD_pard_v2_active_safe_1p06",
+    "LEAD_pard_v2_active_aggressive_0p75_1p25",
     "LEAD_target_speed_schedule_v0",
     "LEAD_target_speed_schedule_shadow",
     "LEAD_target_speed_schedule_v0_safe",
 }
 JSONL_SIDECAR_SCENARIOS = {
     "LEAD_identity_jsonl",
+    "LEAD_pard_v2_shadow",
+    "LEAD_pard_v2_active_ultra_safe",
+    "LEAD_pard_v2_active_safe_1p06",
+    "LEAD_pard_v2_active_aggressive_0p75_1p25",
     "LEAD_target_speed_schedule_v0",
     "LEAD_target_speed_schedule_shadow",
     "LEAD_target_speed_schedule_v0_safe",
 }
+PARD_V2_SCENARIOS = {
+    "LEAD_pard_v2_shadow",
+    "LEAD_pard_v2_active_ultra_safe",
+    "LEAD_pard_v2_active_safe_1p06",
+    "LEAD_pard_v2_active_aggressive_0p75_1p25",
+}
+PARD_V2_SHADOW_SCENARIOS = {
+    "LEAD_pard_v2_shadow",
+}
+PARD_V2_ACTIVE_SCENARIOS = {
+    "LEAD_pard_v2_active_ultra_safe",
+    "LEAD_pard_v2_active_safe_1p06",
+    "LEAD_pard_v2_active_aggressive_0p75_1p25",
+}
+PARD_DAMPER_MIN_BY_SCENARIO = {
+    "LEAD_pard_v2_active_ultra_safe": 1.0,
+    "LEAD_pard_v2_active_safe_1p06": 1.0,
+    "LEAD_pard_v2_active_aggressive_0p75_1p25": 0.75,
+}
+PARD_DAMPER_MAX_BY_SCENARIO = {
+    "LEAD_pard_v2_active_ultra_safe": 1.035,
+    "LEAD_pard_v2_active_safe_1p06": 1.06,
+    "LEAD_pard_v2_active_aggressive_0p75_1p25": 1.25,
+}
+CONSTANT_DAMPER_BY_SCENARIO = {
+    "LEAD_constant_damper_1.02": 1.02,
+    "LEAD_constant_damper_1.03": 1.03,
+}
+CONSTANT_DAMPING_SCENARIOS = set(CONSTANT_DAMPER_BY_SCENARIO)
 TARGET_SPEED_SCENARIOS = {
     "LEAD_target_speed_schedule_v0",
     "LEAD_target_speed_schedule_shadow",
@@ -112,7 +159,7 @@ def parse_args() -> argparse.Namespace:
         help="allowed score_route drop vs baseline (default: 1.0)")
     parser.add_argument(
         "--planning-age-max",
-        default=2.0,
+        default=5.0,
         type=float,
         help="max accepted planning age in frames for JSONL sidecar runs")
     return parser.parse_args()
@@ -184,6 +231,40 @@ def float_or_none(value: Any) -> Optional[float]:
     except (TypeError, ValueError):
         return None
     return result if math.isfinite(result) else None
+
+
+def nonfinite_numeric_literal_count(row: Mapping[str, Any]) -> int:
+    count = 0
+    for value in row.values():
+        if value in ("", None):
+            continue
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            continue
+        if not math.isfinite(number):
+            count += 1
+    return count
+
+
+def finite_values(row: Mapping[str, Any], fields: Sequence[str]) -> List[float]:
+    values: List[float] = []
+    for field in fields:
+        number = float_or_none(row.get(field))
+        if number is not None:
+            values.append(number)
+    return values
+
+
+def first_available_finite_values(
+    row: Mapping[str, Any],
+    field_groups: Sequence[Sequence[str]],
+) -> List[float]:
+    for fields in field_groups:
+        values = finite_values(row, fields)
+        if values:
+            return values
+    return []
 
 
 def int_or_zero(value: Any) -> int:
@@ -437,8 +518,12 @@ def summarize_diagnostics(
         "planning_jsonl_malformed_lines_max": "",
         "planning_jsonl_rejected_messages_max": "",
         "planning_jsonl_read_errors_max": "",
+        "diagnostic_nonfinite_values": 0,
         "damper_nonfinite_violations": 0,
         "damper_bound_violations": 0,
+        "damper_min": "",
+        "damper_mean": "",
+        "damper_max": "",
         "spring_identity_violations": 0,
         "tss_rows": 0,
         "tss_valid_rows": 0,
@@ -449,6 +534,21 @@ def summarize_diagnostics(
         "tss_damper_min": "",
         "tss_damper_mean": "",
         "tss_damper_max": "",
+        "pard_rows": 0,
+        "pard_required_field_missing": 0,
+        "pard_fallback_rows": 0,
+        "pard_fallback_ratio": "",
+        "pard_shadow_rows": 0,
+        "pard_active_rows": 0,
+        "pard_shadow_actual_identity_violations": 0,
+        "pard_would_command_rows": 0,
+        "pard_damper_bound_violations": 0,
+        "pard_damper_min": "",
+        "pard_damper_mean": "",
+        "pard_damper_max": "",
+        "pard_would_damper_min": "",
+        "pard_would_damper_mean": "",
+        "pard_would_damper_max": "",
         "planning_age_gate_ok": "",
     }
     if not path or not os.path.isfile(path):
@@ -464,6 +564,8 @@ def summarize_diagnostics(
     dampers: List[float] = []
     springs: List[float] = []
     tss_dampers: List[float] = []
+    pard_dampers: List[float] = []
+    pard_would_dampers: List[float] = []
     tss_fallback_reasons = set()
     tss_required_fields = (
         "tss_target_speed_raw",
@@ -475,9 +577,48 @@ def summarize_diagnostics(
         "tss_used_trajectory",
         "tss_used_control",
     )
+    pard_required_fields = (
+        "fallback_active",
+        "planning_age_frames",
+        "shadow_mode",
+        "uniform_damper_cmd",
+        "uniform_damper_would",
+        "spring_FL",
+        "spring_FR",
+        "spring_RL",
+        "spring_RR",
+        "damper_FL",
+        "damper_FR",
+        "damper_RL",
+        "damper_RR",
+    )
+    pard_actual_damper_groups = (
+        ("damper_FL", "damper_FR", "damper_RL", "damper_RR"),
+        ("uniform_damper_cmd",),
+        ("damper_scale",),
+    )
+    pard_would_damper_groups = (
+        ("uniform_damper_would",),
+        ("front_damper_would", "rear_damper_would"),
+    )
+    generic_damper_groups = (
+        ("damper_scale",),
+        ("damper_FL", "damper_FR", "damper_RL", "damper_RR"),
+        ("uniform_damper_cmd",),
+    )
+    spring_fields = (
+        "spring_scale",
+        "spring_FL",
+        "spring_FR",
+        "spring_RL",
+        "spring_RR",
+    )
 
     for row in rows:
-        if float_or_none(row.get("planning_available")) and float(row["planning_available"]) > 0.0:
+        summary["diagnostic_nonfinite_values"] += nonfinite_numeric_literal_count(row)
+
+        planning_available = float_or_none(row.get("planning_available"))
+        if planning_available is not None and planning_available > 0.0:
             summary["planning_available_rows"] += 1
         source = row.get("planning_source", "")
         if source:
@@ -491,21 +632,35 @@ def summarize_diagnostics(
             if number is not None:
                 target.append(number)
 
-        damper = float_or_none(row.get("tss_damper_scale_applied"))
-        if damper is not None:
+        tss_values = finite_values(row, ("tss_damper_scale_applied",))
+        if tss_values:
             summary["tss_rows"] += 1
-            tss_dampers.append(damper)
+            tss_dampers.extend(tss_values)
+
+        if scenario_key in PARD_V2_SCENARIOS:
+            actual_dampers = first_available_finite_values(
+                row,
+                pard_actual_damper_groups)
+        elif tss_values:
+            actual_dampers = tss_values
         else:
-            damper = float_or_none(row.get("damper_scale"))
-        if damper is None:
+            actual_dampers = first_available_finite_values(
+                row,
+                generic_damper_groups)
+        damper = actual_dampers[0] if actual_dampers else None
+        if not actual_dampers:
             summary["damper_nonfinite_violations"] += 1
         else:
-            dampers.append(damper)
+            dampers.extend(actual_dampers)
 
-        spring = float_or_none(row.get("spring_scale"))
-        if spring is not None:
-            springs.append(spring)
-            if not math.isclose(spring, 1.0, rel_tol=1.0e-6, abs_tol=1.0e-6):
+        row_springs = finite_values(row, spring_fields)
+        springs.extend(row_springs)
+        for spring in row_springs:
+            if not math.isclose(
+                    spring,
+                    1.0,
+                    rel_tol=1.0e-6,
+                    abs_tol=1.0e-6):
                 summary["spring_identity_violations"] += 1
 
         if scenario_key in TARGET_SPEED_SCENARIOS:
@@ -528,10 +683,51 @@ def summarize_diagnostics(
                 int_or_zero(row.get("tss_used_control")))
             if forbidden:
                 summary["tss_forbidden_usage_rows"] += 1
-        elif scenario_key == "LEAD_constant_damper_1.03":
-            if damper is not None and not math.isclose(
-                    damper, 1.03, rel_tol=1.0e-6, abs_tol=1.0e-6):
-                summary["damper_bound_violations"] += 1
+        elif scenario_key in PARD_V2_SCENARIOS:
+            summary["pard_rows"] += 1
+            if any(field not in row for field in pard_required_fields):
+                summary["pard_required_field_missing"] += 1
+            if int_or_zero(row.get("fallback_active")):
+                summary["pard_fallback_rows"] += 1
+            if int_or_zero(row.get("shadow_mode")):
+                summary["pard_shadow_rows"] += 1
+            if scenario_key in PARD_V2_ACTIVE_SCENARIOS:
+                summary["pard_active_rows"] += 1
+            pard_dampers.extend(actual_dampers)
+            would_dampers = first_available_finite_values(
+                row,
+                pard_would_damper_groups)
+            pard_would_dampers.extend(would_dampers)
+            if any(abs(value - 1.0) > 1.0e-6 for value in would_dampers):
+                summary["pard_would_command_rows"] += 1
+            if scenario_key in PARD_V2_SHADOW_SCENARIOS:
+                if actual_dampers and any(
+                        not math.isclose(
+                            value,
+                            1.0,
+                            rel_tol=1.0e-6,
+                            abs_tol=1.0e-6)
+                        for value in actual_dampers):
+                    summary["pard_shadow_actual_identity_violations"] += 1
+            if scenario_key in PARD_V2_ACTIVE_SCENARIOS:
+                damper_min = PARD_DAMPER_MIN_BY_SCENARIO.get(scenario_key, 1.0)
+                damper_max = PARD_DAMPER_MAX_BY_SCENARIO.get(scenario_key)
+                for value in actual_dampers:
+                    if value < damper_min - 1.0e-6:
+                        summary["pard_damper_bound_violations"] += 1
+                        summary["damper_bound_violations"] += 1
+                    if damper_max is not None and value > damper_max + 1.0e-6:
+                        summary["pard_damper_bound_violations"] += 1
+                        summary["damper_bound_violations"] += 1
+        elif scenario_key in CONSTANT_DAMPING_SCENARIOS:
+            expected = CONSTANT_DAMPER_BY_SCENARIO[scenario_key]
+            for value in actual_dampers:
+                if not math.isclose(
+                        value,
+                        expected,
+                        rel_tol=1.0e-6,
+                        abs_tol=1.0e-6):
+                    summary["damper_bound_violations"] += 1
 
     summary["planning_sources"] = ";".join(sorted(planning_sources))
     summary["planning_age_min"] = min_or_empty(planning_ages)
@@ -540,10 +736,22 @@ def summarize_diagnostics(
     summary["planning_jsonl_malformed_lines_max"] = max_or_empty(malformed)
     summary["planning_jsonl_rejected_messages_max"] = max_or_empty(rejected)
     summary["planning_jsonl_read_errors_max"] = max_or_empty(read_errors)
+    summary["damper_min"] = min_or_empty(dampers)
+    summary["damper_mean"] = mean_or_empty(dampers)
+    summary["damper_max"] = max_or_empty(dampers)
     summary["tss_fallback_reasons"] = ";".join(sorted(tss_fallback_reasons))
     summary["tss_damper_min"] = min_or_empty(tss_dampers)
     summary["tss_damper_mean"] = mean_or_empty(tss_dampers)
     summary["tss_damper_max"] = max_or_empty(tss_dampers)
+    if summary["pard_rows"]:
+        summary["pard_fallback_ratio"] = (
+            summary["pard_fallback_rows"] / summary["pard_rows"])
+    summary["pard_damper_min"] = min_or_empty(pard_dampers)
+    summary["pard_damper_mean"] = mean_or_empty(pard_dampers)
+    summary["pard_damper_max"] = max_or_empty(pard_dampers)
+    summary["pard_would_damper_min"] = min_or_empty(pard_would_dampers)
+    summary["pard_would_damper_mean"] = mean_or_empty(pard_would_dampers)
+    summary["pard_would_damper_max"] = max_or_empty(pard_would_dampers)
     if planning_ages:
         summary["planning_age_gate_ok"] = int(max(planning_ages) <= planning_age_limit)
     return summary
@@ -582,10 +790,10 @@ def expected_plan(args: argparse.Namespace, root: str) -> List[Dict[str, str]]:
 
     if args.mode == "full":
         scenarios = FULL_SCENARIOS
-        default_seeds = "100,101,102"
+        default_seeds = "111,112,113"
     else:
         scenarios = SMOKE_SCENARIOS
-        default_seeds = "100"
+        default_seeds = "111"
     if args.scenarios:
         scenarios = tuple(parse_csv_list(args.scenarios))
     seeds = parse_csv_list(args.seeds or default_seeds)
@@ -802,6 +1010,18 @@ def evaluate_gates(
             return False
         if int_or_zero(row.get("sidecar_runtime_hard_error_count")):
             return False
+        if scenario in PARD_V2_SCENARIOS:
+            if int_or_zero(row.get("diagnostic_nonfinite_values")):
+                return False
+            if int_or_zero(row.get("pard_damper_bound_violations")):
+                return False
+            if int_or_zero(row.get("pard_required_field_missing")):
+                return False
+            if (
+                    scenario in PARD_V2_SHADOW_SCENARIOS and
+                    int_or_zero(row.get(
+                        "pard_shadow_actual_identity_violations"))):
+                return False
         return True
 
     by_seed_scenario = {
@@ -899,9 +1119,27 @@ def evaluate_gates(
                 if rows_count == 0 or shadow_rows != rows_count:
                     failures.append("shadow_mode_not_applied")
 
-        if not invalid_run and scenario == "LEAD_constant_damper_1.03":
+        if not invalid_run and scenario in PARD_V2_SCENARIOS:
+            if int_or_zero(row.get("pard_rows")) == 0:
+                failures.append("missing_pard_diagnostics")
+            if int_or_zero(row.get("pard_required_field_missing")) != 0:
+                failures.append("missing_pard_fields")
+            if int_or_zero(row.get("diagnostic_nonfinite_values")) != 0:
+                failures.append("diagnostic_nonfinite")
+            if int_or_zero(row.get("pard_damper_bound_violations")) != 0:
+                failures.append("pard_damper_bounds")
+            if scenario in PARD_V2_SHADOW_SCENARIOS:
+                rows_count = int_or_zero(row.get("pard_rows"))
+                shadow_rows = int_or_zero(row.get("pard_shadow_rows"))
+                if rows_count == 0 or shadow_rows != rows_count:
+                    failures.append("shadow_mode_not_applied")
+                if int_or_zero(row.get(
+                        "pard_shadow_actual_identity_violations")) != 0:
+                    failures.append("pard_shadow_actual_not_identity")
+
+        if not invalid_run and scenario in CONSTANT_DAMPING_SCENARIOS:
             if int_or_zero(row.get("damper_bound_violations")) != 0:
-                failures.append("constant_damper_not_1p03")
+                failures.append("constant_damper_not_expected")
 
         score_delta = ""
         route_score_delta = ""

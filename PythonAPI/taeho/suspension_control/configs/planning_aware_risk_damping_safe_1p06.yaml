@@ -1,0 +1,8 @@
+# PARD v2 later sensitivity config. Do not use as the first active gate.
+
+shadow_mode: false
+output_mode: uniform
+damper_min: 1.0
+damper_max: 1.06
+max_uniform_extra: 0.06
+max_scale_rate_per_s: 0.12

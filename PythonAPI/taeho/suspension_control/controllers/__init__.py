@@ -17,6 +17,10 @@ from .estimators import (
 )
 from .identity import IdentityController
 from .pid import FeedbackPIDConfig, FeedbackPIDController
+from .planning_aware_risk_damping import (
+    PlanningAwareRiskDampingConfig,
+    PlanningAwareRiskDampingController,
+)
 from .rl_residual import ResidualRLConfig, ResidualRLController
 from .skyhook import SkyhookConfig, SkyhookController
 from .skyhook_roll import SkyhookRollConfig, SkyhookRollController
@@ -37,6 +41,8 @@ __all__ = [
     "IdentityController",
     "PlanningInfo",
     "PlanningPoint",
+    "PlanningAwareRiskDampingConfig",
+    "PlanningAwareRiskDampingController",
     "PlanningPreviewSuspensionController",
     "ResidualRLConfig",
     "ResidualRLController",
