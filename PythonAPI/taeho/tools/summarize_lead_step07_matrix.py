@@ -40,6 +40,8 @@ SIDECAR_SCENARIOS = {
     "LEAD_identity",
     "LEAD_identity_jsonl",
     "LEAD_skyhook",
+    "LEAD_skyhook_roll",
+    "LEAD_planning_aware",
     "LEAD_constant_damper_1.02",
     "LEAD_constant_damper_1.03",
     "LEAD_pard_v2_shadow",
@@ -53,6 +55,7 @@ SIDECAR_SCENARIOS = {
 JSONL_SCENARIOS = {
     "LEAD_export_only",
     "LEAD_identity_jsonl",
+    "LEAD_planning_aware",
     "LEAD_pard_v2_shadow",
     "LEAD_pard_v2_active_ultra_safe",
     "LEAD_pard_v2_active_safe_1p06",
@@ -63,6 +66,7 @@ JSONL_SCENARIOS = {
 }
 JSONL_SIDECAR_SCENARIOS = {
     "LEAD_identity_jsonl",
+    "LEAD_planning_aware",
     "LEAD_pard_v2_shadow",
     "LEAD_pard_v2_active_ultra_safe",
     "LEAD_pard_v2_active_safe_1p06",

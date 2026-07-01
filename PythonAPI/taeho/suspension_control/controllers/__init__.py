@@ -21,6 +21,10 @@ from .planning_aware_risk_damping import (
     PlanningAwareRiskDampingConfig,
     PlanningAwareRiskDampingController,
 )
+from .planning_aware_skyhook_roll import (
+    PlanningAwareSkyhookRollConfig,
+    PlanningAwareSkyhookRollController,
+)
 from .rl_residual import ResidualRLConfig, ResidualRLController
 from .skyhook import SkyhookConfig, SkyhookController
 from .skyhook_roll import SkyhookRollConfig, SkyhookRollController
@@ -43,6 +47,8 @@ __all__ = [
     "PlanningPoint",
     "PlanningAwareRiskDampingConfig",
     "PlanningAwareRiskDampingController",
+    "PlanningAwareSkyhookRollConfig",
+    "PlanningAwareSkyhookRollController",
     "PlanningPreviewSuspensionController",
     "ResidualRLConfig",
     "ResidualRLController",

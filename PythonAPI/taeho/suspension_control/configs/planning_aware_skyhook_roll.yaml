@@ -1,0 +1,96 @@
+# Fair Step 03 comparator:
+# LEAD planning-preview feedforward + unchanged skyhook_roll feedback residual.
+
+controller_version: planning_aware_skyhook_roll_v1_feedforward_plus_skyhook_roll
+default_dt: 0.05
+wheel_count: 4
+
+# Same geometry, state contract, and skyhook_roll feedback residual config.
+half_wheelbase_m: 1.45
+half_track_m: 0.85
+front_x_sign: 1.0
+left_y_sign: -1.0
+angular_velocity_source: actor_getter_deg_s
+angular_velocity_unit: deg_s
+
+require_suspension_state: true
+identity_if_any_wheel_invalid: true
+require_contact_valid: true
+require_velocity: true
+relative_extension_sign: -1.0
+
+skyhook_law: projected_force
+skyhook_c_scale: 1.0
+neutral_damper_scale: 1.0
+low_damper_scale: 0.82
+high_damper_scale: 1.22
+min_damper_scale: 0.75
+max_damper_scale: 1.25
+max_damper_delta_per_step: 0.035
+
+sprung_velocity_deadband: 0.025
+rel_velocity_deadband: 0.015
+product_deadband: 0.0005
+projection_eps: 0.000001
+
+roll_damper_enabled: true
+roll_c_scale: 0.20
+max_roll_extra_scale: 0.08
+roll_softening_override_limit: 0.03
+
+roll_ay_on: 1.5
+roll_ay_full: 5.0
+roll_rate_on_deg_s: 1.5
+roll_rate_full_deg_s: 12.0
+roll_angle_on_deg: 1.0
+roll_angle_full_deg: 5.0
+
+outer_side_sign_from_ay: -1.0
+outer_side_bias: 0.10
+inner_side_relief: 0.05
+nominal_front_roll_distribution: 0.55
+
+roll_spring_enabled: false
+enable_roll_spring_control: false
+base_spring_scale: 1.0
+min_spring_scale: 1.0
+max_spring_scale: 1.0
+max_spring_delta_per_step: 0.0
+
+enable_yaw_distribution: false
+
+# Preview feedforward. Damper-only, additive, bounded by the same max damper
+# scale and same per-step command delta used by skyhook_roll.
+max_preview_damper_extra: 0.035
+preview_tau_rise: 0.30
+preview_tau_fall: 0.90
+preview_horizon_s: 1.5
+near_window_s: 0.75
+far_window_s: 1.50
+far_weight: 0.50
+single_point_weight: 0.60
+max_planning_age_frames: 5
+min_horizon_dt: 0.02
+max_horizon_dt: 0.20
+min_preview_points_for_trajectory_curvature: 3
+speed_cap_mps: 45.0
+motion_gate_low: 3.0
+motion_gate_high: 7.0
+ay_abs_cap: 8.0
+ay_low: 2.0
+ay_high: 5.0
+curvature_abs_cap: 0.25
+curvature_low: 0.030
+curvature_high: 0.110
+steer_low: 0.12
+steer_high: 0.50
+target_speed_drop_window_s: 1.0
+decel_low: 1.5
+decel_high: 4.0
+brake_low: 0.20
+brake_high: 0.70
+speed_drop_low: 2.0
+speed_drop_high: 6.0
+preview_inner_side_factor: 0.55
+
+debug: false

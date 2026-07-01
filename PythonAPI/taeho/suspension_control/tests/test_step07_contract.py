@@ -26,6 +26,9 @@ from suspension_control.controllers.estimators import (
 from suspension_control.controllers.planning_aware_risk_damping import (
     PlanningAwareRiskDampingController,
 )
+from suspension_control.controllers.planning_aware_skyhook_roll import (
+    PlanningAwareSkyhookRollController,
+)
 from suspension_control.controllers.skyhook import SkyhookController
 from suspension_control.controllers.skyhook_roll import SkyhookRollController
 from suspension_control.controllers.target_speed_schedule import (
@@ -249,7 +252,7 @@ class Step07SuiteSelectionTest(unittest.TestCase):
             "skyhook_roll,skyhook_roll_yaw,skyhook_estimator_dryrun,"
             "constant_damper_1p02,pard_v2_shadow,"
             "pard_v2_active_ultra_safe,pard_v2_active_safe_1p06,"
-            "pard_v2_active_aggressive_0p75_1p25")
+            "pard_v2_active_aggressive_0p75_1p25,planning_aware")
 
         self.assertEqual(
             [
@@ -265,13 +268,14 @@ class Step07SuiteSelectionTest(unittest.TestCase):
                 "S24_pard_v2_active_ultra_safe",
                 "S25_pard_v2_active_safe_1p06",
                 "S26_pard_v2_active_aggressive_0p75_1p25",
+                "S27_planning_aware",
             ],
             [scenario["name"] for scenario in scenarios])
 
     def test_new_scenarios_are_selectable_by_code(self):
         import transfuser_suspension_control_suite as suite
 
-        scenarios = suite.selected_scenarios("S19,S20,S21,S22,S23,S24,S25,S26")
+        scenarios = suite.selected_scenarios("S19,S20,S21,S22,S23,S24,S25,S26,S27")
 
         self.assertEqual(
             [
@@ -283,6 +287,7 @@ class Step07SuiteSelectionTest(unittest.TestCase):
                 "S24_pard_v2_active_ultra_safe",
                 "S25_pard_v2_active_safe_1p06",
                 "S26_pard_v2_active_aggressive_0p75_1p25",
+                "S27_planning_aware",
             ],
             [scenario["name"] for scenario in scenarios])
 
@@ -325,6 +330,7 @@ class Step07SuiteSelectionTest(unittest.TestCase):
             "planning_aware_risk_damping_aggressive_0p75_1p25",
             args)
         pard_alias = suite.make_controller("pard_v2", args)
+        planning_aware = suite.make_controller("planning_aware", args)
 
         self.assertIsInstance(constant, ConstantScaleController)
         self.assertIsInstance(constant_1p02, ConstantScaleController)
@@ -340,6 +346,7 @@ class Step07SuiteSelectionTest(unittest.TestCase):
         self.assertIsInstance(pard_safe, PlanningAwareRiskDampingController)
         self.assertIsInstance(pard_aggressive, PlanningAwareRiskDampingController)
         self.assertIsInstance(pard_alias, PlanningAwareRiskDampingController)
+        self.assertIsInstance(planning_aware, PlanningAwareSkyhookRollController)
         self.assertEqual(1.02, constant_1p02.config.damper_scale)
         self.assertTrue(pard_shadow.config.shadow_mode)
         self.assertEqual(1.035, pard_ultra.config.damper_max)
@@ -721,6 +728,8 @@ class Step07RunnerMappingTest(unittest.TestCase):
         script = os.path.join(sim_root, "scripts", "run_lead_step07_matrix.sh")
         scenarios = ",".join((
             "LEAD_constant_damper_1.02",
+            "LEAD_skyhook_roll",
+            "LEAD_planning_aware",
             "LEAD_pard_v2_shadow",
             "LEAD_pard_v2_active_ultra_safe",
             "LEAD_pard_v2_active_safe_1p06",
@@ -757,6 +766,12 @@ class Step07RunnerMappingTest(unittest.TestCase):
             "scenario=LEAD_constant_damper_1.02 kind=sidecar",
             output)
         self.assertIn(
+            "scenario=LEAD_skyhook_roll kind=sidecar",
+            output)
+        self.assertIn(
+            "scenario=LEAD_planning_aware kind=sidecar",
+            output)
+        self.assertIn(
             "scenario=LEAD_pard_v2_shadow kind=sidecar",
             output)
         self.assertIn(
@@ -769,14 +784,16 @@ class Step07RunnerMappingTest(unittest.TestCase):
             "scenario=LEAD_pard_v2_active_aggressive_0p75_1p25 kind=sidecar",
             output)
         self.assertIn("--scenarios constant_damper_1p02", output)
+        self.assertIn("--scenarios skyhook_roll", output)
+        self.assertIn("--scenarios planning_aware", output)
         self.assertIn("--scenarios pard_v2_shadow", output)
         self.assertIn("--scenarios pard_v2_active_ultra_safe", output)
         self.assertIn("--scenarios pard_v2_active_safe_1p06", output)
         self.assertIn(
             "--scenarios pard_v2_active_aggressive_0p75_1p25",
             output)
-        self.assertGreaterEqual(output.count("--planning-provider jsonl"), 4)
-        self.assertGreaterEqual(output.count("--planning-preview-jsonl"), 4)
+        self.assertGreaterEqual(output.count("--planning-provider jsonl"), 5)
+        self.assertGreaterEqual(output.count("--planning-preview-jsonl"), 5)
 
     def test_parallel_runner_synthesizes_pard_jsonl_sidecar_plan(self):
         sim_root = _sim_root()
@@ -879,6 +896,12 @@ class Step07SummaryPardGateTest(unittest.TestCase):
             self.assertIn(scenario, tool.JSONL_SIDECAR_SCENARIOS)
             self.assertIn(scenario, tool.PARD_V2_SCENARIOS)
 
+        self.assertIn("LEAD_skyhook_roll", tool.SIDECAR_SCENARIOS)
+        self.assertIn("LEAD_planning_aware", tool.SIDECAR_SCENARIOS)
+        self.assertIn("LEAD_planning_aware", tool.JSONL_SCENARIOS)
+        self.assertIn("LEAD_planning_aware", tool.JSONL_SIDECAR_SCENARIOS)
+        self.assertNotIn("LEAD_planning_aware", tool.PARD_V2_SCENARIOS)
+
         self.assertIn(
             "LEAD_constant_damper_1.02",
             tool.CONSTANT_DAMPING_SCENARIOS)
@@ -905,12 +928,17 @@ class Step07SummaryPardGateTest(unittest.TestCase):
             args = type("Args", (), {
                 "mode": "smoke",
                 "seeds": "101",
-                "scenarios": "LEAD_pard_v2_shadow,"
+                "scenarios": "LEAD_planning_aware,LEAD_pard_v2_shadow,"
                              "LEAD_constant_damper_1.02",
             })()
             plan = tool.expected_plan(args, temp_dir)
 
         by_scenario = {row["scenario_key"]: row for row in plan}
+        self.assertEqual(
+            "sidecar",
+            by_scenario["LEAD_planning_aware"]["run_kind"])
+        self.assertTrue(by_scenario["LEAD_planning_aware"][
+            "planning_jsonl_host"].endswith("planning_preview.jsonl"))
         self.assertEqual(
             "sidecar",
             by_scenario["LEAD_pard_v2_shadow"]["run_kind"])

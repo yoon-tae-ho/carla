@@ -70,6 +70,10 @@ from suspension_control.controllers.planning_aware_risk_damping import (
     PlanningAwareRiskDampingConfig,
     PlanningAwareRiskDampingController,
 )
+from suspension_control.controllers.planning_aware_skyhook_roll import (
+    PlanningAwareSkyhookRollConfig,
+    PlanningAwareSkyhookRollController,
+)
 from suspension_control.controllers.rl_residual import (
     ResidualRLConfig,
     ResidualRLController,
@@ -175,6 +179,12 @@ DEFAULT_PARD_V2_AGGRESSIVE_0P75_1P25_CONFIG = os.path.join(
     "suspension_control",
     "configs",
     "planning_aware_risk_damping_aggressive_0p75_1p25.yaml",
+)
+DEFAULT_PLANNING_AWARE_SKYHOOK_ROLL_CONFIG = os.path.join(
+    SCRIPT_DIR,
+    "suspension_control",
+    "configs",
+    "planning_aware_skyhook_roll.yaml",
 )
 DEFAULT_RL_RESIDUAL_CONFIG = os.path.join(
     SCRIPT_DIR, "suspension_control", "configs", "rl_residual.yaml")
@@ -362,11 +372,19 @@ SCENARIOS = OrderedDict((
         "controller": "planning_aware_risk_damping_aggressive_0p75_1p25",
         "uses_suspension_api": True,
     }),
+    ("planning_aware", {
+        "name": "S27_planning_aware",
+        "label": "S27 planning-aware skyhook-roll",
+        "controller": "planning_aware",
+        "uses_suspension_api": True,
+        "needs_suspension_state": True,
+    }),
 ))
 
 SCENARIO_ALIASES = {
     "pard_v2": "pard_v2_active_ultra_safe",
     "planning_risk_damping": "pard_v2_active_ultra_safe",
+    "planning_aware_skyhook_roll": "planning_aware",
 }
 
 
@@ -728,6 +746,54 @@ DIAGNOSTIC_FIELDS = (
     "skyhook_roll_spring_add_fr",
     "skyhook_roll_spring_add_rl",
     "skyhook_roll_spring_add_rr",
+    "planning_aware_feedback_source",
+    "planning_aware_preview_source",
+    "planning_aware_valid",
+    "planning_aware_fallback_reason",
+    "planning_aware_risk_raw",
+    "planning_aware_risk_smooth",
+    "planning_aware_r_lat_preview",
+    "planning_aware_r_brake_preview",
+    "planning_aware_r_curvature_preview",
+    "planning_aware_r_ay_preview",
+    "planning_aware_r_steer_preview",
+    "planning_aware_r_decel_preview",
+    "planning_aware_r_speed_drop",
+    "planning_aware_motion_gate",
+    "planning_aware_source_mask",
+    "planning_aware_planning_age_frames",
+    "planning_aware_preview_points_used",
+    "planning_aware_horizon_dt",
+    "planning_aware_curvature_source",
+    "planning_aware_predicted_ay_source",
+    "planning_aware_signed_lat_peak",
+    "planning_aware_max_preview_damper_extra",
+    "planning_aware_rate_limited_any",
+    "planning_aware_clamped_any",
+    "planning_aware_feedback_damper_fl",
+    "planning_aware_feedback_damper_fr",
+    "planning_aware_feedback_damper_rl",
+    "planning_aware_feedback_damper_rr",
+    "planning_aware_feedback_spring_fl",
+    "planning_aware_feedback_spring_fr",
+    "planning_aware_feedback_spring_rl",
+    "planning_aware_feedback_spring_rr",
+    "planning_feedforward_damper_add_fl",
+    "planning_feedforward_damper_add_fr",
+    "planning_feedforward_damper_add_rl",
+    "planning_feedforward_damper_add_rr",
+    "planning_aware_combined_damper_fl",
+    "planning_aware_combined_damper_fr",
+    "planning_aware_combined_damper_rl",
+    "planning_aware_combined_damper_rr",
+    "planning_aware_rate_limited_fl",
+    "planning_aware_rate_limited_fr",
+    "planning_aware_rate_limited_rl",
+    "planning_aware_rate_limited_rr",
+    "planning_aware_clamped_fl",
+    "planning_aware_clamped_fr",
+    "planning_aware_clamped_rl",
+    "planning_aware_clamped_rr",
     "tss_target_speed_raw",
     "tss_target_speed_valid",
     "tss_target_speed_ema",
@@ -1119,6 +1185,14 @@ def build_planning_aware_risk_damping_aggressive_config(
     return PlanningAwareRiskDampingConfig.from_mapping(values)
 
 
+def build_planning_aware_skyhook_roll_config(
+    path: str,
+) -> PlanningAwareSkyhookRollConfig:
+    if path and os.path.isfile(path):
+        return PlanningAwareSkyhookRollConfig.from_mapping(read_flat_yaml(path))
+    return PlanningAwareSkyhookRollConfig()
+
+
 def build_rl_residual_config(
     args: argparse.Namespace,
     baseline_override: str = "",
@@ -1191,6 +1265,10 @@ def make_controller(controller_name: str, args: argparse.Namespace):
     if controller_name == "skyhook_roll_yaw":
         return SkyhookRollController(build_skyhook_roll_config(
             args.skyhook_roll_yaw_config))
+    if controller_name == "planning_aware":
+        return PlanningAwareSkyhookRollController(
+            build_planning_aware_skyhook_roll_config(
+                args.planning_aware_skyhook_roll_config))
     if controller_name == "constant_scale":
         return ConstantScaleController(build_constant_scale_config(
             args.constant_scale_config))
@@ -4613,7 +4691,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "pard_v2_shadow,"
         "pard_v2_active_ultra_safe,"
         "pard_v2_active_safe_1p06,"
-        "pard_v2_active_aggressive_0p75_1p25 "
+        "pard_v2_active_aggressive_0p75_1p25,"
+        "planning_aware "
         "(default: stock,identity,pid)")
     parser.add_argument(
         "--baseline-scenario",
@@ -4680,6 +4759,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--planning-aware-risk-damping-aggressive-0p75-1p25-config",
         default=DEFAULT_PARD_V2_AGGRESSIVE_0P75_1P25_CONFIG,
         help="flat YAML PARD v2 aggressive 0.75-1.25 config path")
+    parser.add_argument(
+        "--planning-aware-skyhook-roll-config",
+        default=DEFAULT_PLANNING_AWARE_SKYHOOK_ROLL_CONFIG,
+        help="flat YAML fair planning-aware skyhook-roll config path")
     parser.add_argument(
         "--rl-residual-config",
         default=DEFAULT_RL_RESIDUAL_CONFIG,

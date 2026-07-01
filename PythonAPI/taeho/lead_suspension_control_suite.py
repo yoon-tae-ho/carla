@@ -257,7 +257,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
                 "pard_v2_shadow,"
                 "pard_v2_active_ultra_safe,"
                 "pard_v2_active_safe_1p06,"
-                "pard_v2_active_aggressive_0p75_1p25 "
+                "pard_v2_active_aggressive_0p75_1p25,"
+                "planning_aware "
                 "(default: stock,identity,skyhook)")
     return parser
 
