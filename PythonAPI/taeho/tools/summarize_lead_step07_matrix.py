@@ -37,6 +37,7 @@ FULL_SCENARIOS = (
     "LEAD_pard_v2_active_ultra_safe",
 )
 SIDECAR_SCENARIOS = {
+    "LEAD_stock_sidecar",
     "LEAD_identity",
     "LEAD_identity_jsonl",
     "LEAD_skyhook",
@@ -51,6 +52,9 @@ SIDECAR_SCENARIOS = {
     "LEAD_target_speed_schedule_v0",
     "LEAD_target_speed_schedule_shadow",
     "LEAD_target_speed_schedule_v0_safe",
+}
+PROFILE_ONLY_SIDECAR_SCENARIOS = {
+    "LEAD_stock_sidecar",
 }
 JSONL_SCENARIOS = {
     "LEAD_export_only",
@@ -1035,7 +1039,11 @@ def evaluate_gates(
     baseline_by_seed: Dict[str, Dict[str, Any]] = {}
     for row in rows:
         seed = str(row.get("seed", ""))
-        for scenario in ("LEAD_identity_jsonl", "LEAD_identity", "LEAD_stock"):
+        for scenario in (
+                "LEAD_identity_jsonl",
+                "LEAD_identity",
+                "LEAD_stock_sidecar",
+                "LEAD_stock"):
             baseline = by_seed_scenario.get((seed, scenario))
             if baseline and baseline.get("checkpoint_exists"):
                 baseline_by_seed[seed] = baseline
@@ -1082,11 +1090,17 @@ def evaluate_gates(
                 warnings.append("actor_removed_warning")
             if int_or_zero(row.get("sidecar_runtime_hard_error_count")) != 0:
                 failures.append("sidecar_runtime_hard_error")
-            if int_or_zero(row.get("controller_diagnostic_rows")) == 0:
+            if (
+                    scenario not in PROFILE_ONLY_SIDECAR_SCENARIOS and
+                    int_or_zero(row.get("controller_diagnostic_rows")) == 0):
                 failures.append("missing_controller_diagnostics")
-            if int_or_zero(row.get("damper_nonfinite_violations")) != 0:
+            if (
+                    scenario not in PROFILE_ONLY_SIDECAR_SCENARIOS and
+                    int_or_zero(row.get("damper_nonfinite_violations")) != 0):
                 failures.append("damper_nonfinite")
-            if int_or_zero(row.get("spring_identity_violations")) != 0:
+            if (
+                    scenario not in PROFILE_ONLY_SIDECAR_SCENARIOS and
+                    int_or_zero(row.get("spring_identity_violations")) != 0):
                 failures.append("spring_not_identity")
 
         if not invalid_run and scenario in JSONL_SCENARIOS:

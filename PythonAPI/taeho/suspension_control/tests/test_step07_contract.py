@@ -727,6 +727,7 @@ class Step07RunnerMappingTest(unittest.TestCase):
         sim_root = _sim_root()
         script = os.path.join(sim_root, "scripts", "run_lead_step07_matrix.sh")
         scenarios = ",".join((
+            "LEAD_stock_sidecar",
             "LEAD_constant_damper_1.02",
             "LEAD_skyhook_roll",
             "LEAD_planning_aware",
@@ -763,6 +764,9 @@ class Step07RunnerMappingTest(unittest.TestCase):
             msg=result.stdout[-4000:] + result.stderr[-4000:])
         output = result.stdout
         self.assertIn(
+            "scenario=LEAD_stock_sidecar kind=sidecar",
+            output)
+        self.assertIn(
             "scenario=LEAD_constant_damper_1.02 kind=sidecar",
             output)
         self.assertIn(
@@ -792,6 +796,7 @@ class Step07RunnerMappingTest(unittest.TestCase):
         self.assertIn(
             "--scenarios pard_v2_active_aggressive_0p75_1p25",
             output)
+        self.assertIn("--scenarios stock", output)
         self.assertGreaterEqual(output.count("--planning-provider jsonl"), 5)
         self.assertGreaterEqual(output.count("--planning-preview-jsonl"), 5)
 
@@ -897,6 +902,10 @@ class Step07SummaryPardGateTest(unittest.TestCase):
             self.assertIn(scenario, tool.PARD_V2_SCENARIOS)
 
         self.assertIn("LEAD_skyhook_roll", tool.SIDECAR_SCENARIOS)
+        self.assertIn("LEAD_stock_sidecar", tool.SIDECAR_SCENARIOS)
+        self.assertIn(
+            "LEAD_stock_sidecar",
+            tool.PROFILE_ONLY_SIDECAR_SCENARIOS)
         self.assertIn("LEAD_planning_aware", tool.SIDECAR_SCENARIOS)
         self.assertIn("LEAD_planning_aware", tool.JSONL_SCENARIOS)
         self.assertIn("LEAD_planning_aware", tool.JSONL_SIDECAR_SCENARIOS)
