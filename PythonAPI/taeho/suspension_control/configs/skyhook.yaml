@@ -1,6 +1,6 @@
 # Default config for controllers.skyhook.SkyhookController.
 
-controller_version: skyhook_v2_state_strict
+controller_version: skyhook_v3_canonical
 default_dt: 0.05
 wheel_count: 4
 
@@ -12,6 +12,7 @@ front_x_sign: 1.0
 left_y_sign: -1.0
 angular_velocity_source: actor_getter_deg_s
 angular_velocity_unit: deg_s
+vertical_velocity_source: world_z
 
 # State source and strict fallback.
 require_suspension_state: true
@@ -35,3 +36,8 @@ sprung_velocity_deadband: 0.025
 rel_velocity_deadband: 0.015
 product_deadband: 0.0005
 projection_eps: 0.000001
+
+# Startup invalid velocity-cache rows are diagnostic-only and still command
+# identity.
+startup_prime_diagnostics_enabled: true
+startup_prime_max_frames: 3

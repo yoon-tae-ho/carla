@@ -656,6 +656,79 @@ class Step07SuiteSelectionTest(unittest.TestCase):
                 "exception_type"):
             self.assertIn(field_name, suite.DIAGNOSTIC_FIELDS)
 
+    def test_skyhook_v3_canonical_csv_contract_fields_registered(self):
+        import transfuser_suspension_control_suite as suite
+
+        wheel_labels = ("fl", "fr", "rl", "rr")
+        scalar_fields = (
+            "expected_dt",
+            "frame_delta",
+            "dt_gap_warning",
+            "max_damper_delta_per_step_used",
+            "vertical_velocity_source",
+            "v_world_z",
+            "startup_prime",
+            "startup_prime_reason",
+            "startup_prime_frame_count",
+        )
+        existing_per_wheel_fields = (
+            "v_sprung",
+            "v_roll",
+            "v_pitch",
+            "v_rel_extension_mps",
+            "F_sky_ideal",
+            "F_total_ideal",
+            "C_native",
+            "C_required",
+            "semi_active_feasible",
+            "skyhook_only_target_damper",
+            "final_target_damper",
+            "final_spring_scale",
+            "final_damper_scale",
+            "rate_limited_damper",
+            "clamped_damper",
+            "soft_mode",
+            "hard_mode",
+            "neutral_mode",
+            "skyhook_corner_vz",
+            "skyhook_activity",
+            "skyhook_damper_scale",
+        )
+        v3_per_wheel_fields = (
+            "v_sprung_used",
+            "skyhook_product",
+            "abs_v_sprung",
+            "abs_v_rel",
+            "target_branch",
+            "required_scale_unclipped",
+            "raw_target_damper",
+            "target_after_minmax_clamp",
+            "rate_limited_damper_scale",
+        )
+        readback_fields = (
+            "per_wheel_damper_scale_readback_fl",
+            "per_wheel_damper_scale_readback_fr",
+            "per_wheel_damper_scale_readback_rl",
+            "per_wheel_damper_scale_readback_rr",
+            "per_wheel_spring_scale_readback_fl",
+            "per_wheel_spring_scale_readback_fr",
+            "per_wheel_spring_scale_readback_rl",
+            "per_wheel_spring_scale_readback_rr",
+            "apply_suspension_command_return_value",
+            "apply_success",
+        )
+        required_fields = list(scalar_fields) + list(readback_fields)
+        for label in wheel_labels:
+            for field in existing_per_wheel_fields + v3_per_wheel_fields:
+                required_fields.append("%s_%s" % (field, label))
+
+        missing = [
+            field for field in required_fields
+            if field not in suite.DIAGNOSTIC_FIELDS
+        ]
+
+        self.assertEqual([], missing)
+
     def test_yaw_proposal_summary_reports_event_window(self):
         import transfuser_suspension_control_suite as suite
 

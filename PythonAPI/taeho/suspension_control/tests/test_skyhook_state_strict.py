@@ -1,12 +1,22 @@
-"""CARLA-free checks for skyhook_v2_state_strict."""
+"""CARLA-free checks for skyhook_v3_canonical and v2 equivalence."""
 
 from __future__ import annotations
 
+from dataclasses import fields
 import math
 import unittest
 
-from suspension_control.controllers.base import ControllerContext, VehicleState
-from suspension_control.controllers.skyhook import SkyhookConfig, SkyhookController
+from suspension_control.controllers.base import (
+    ControllerContext,
+    PlanningInfo,
+    VehicleState,
+)
+from suspension_control.controllers.skyhook import (
+    SKYHOOK_V2_STATE_STRICT_VERSION,
+    SKYHOOK_V3_CANONICAL_VERSION,
+    SkyhookConfig,
+    SkyhookController,
+)
 
 
 class _FakeWheel:
@@ -57,13 +67,18 @@ class _FakeNativeSuspension:
 
 def _context(
     state=None,
+    previous_state=None,
+    planning=None,
     suspension_state=None,
     suspension_state_valid=True,
     invalid_reason="",
     native_dampers=(4500.0, 4500.0, 4500.0, 4500.0),
+    dt=0.05,
 ):
     return ControllerContext(
-        state=state if state is not None else VehicleState(vz=1.0, dt=0.05),
+        state=state if state is not None else VehicleState(vz=1.0, dt=dt),
+        previous_state=previous_state,
+        planning=planning if planning is not None else PlanningInfo.empty(),
         native_suspension=_FakeNativeSuspension(),
         current_suspension=_FakeNativeSuspension(),
         suspension_state=(
@@ -73,7 +88,7 @@ def _context(
         suspension_state_invalid_reason=invalid_reason,
         native_spring_strength_by_wheel=(35000.0,) * 4,
         native_damper_rate_by_wheel=native_dampers,
-        dt=0.05)
+        dt=dt)
 
 
 def _config(**overrides):
@@ -96,6 +111,56 @@ def _dampers(output):
 
 
 class SkyhookStateStrictTest(unittest.TestCase):
+
+    def test_default_version_is_v3_and_v2_remains_constructible(self):
+        self.assertEqual(
+            SKYHOOK_V3_CANONICAL_VERSION,
+            SkyhookConfig().controller_version)
+        self.assertEqual(
+            SKYHOOK_V2_STATE_STRICT_VERSION,
+            SkyhookConfig(
+                controller_version=SKYHOOK_V2_STATE_STRICT_VERSION
+            ).controller_version)
+
+    def test_v3_numeric_defaults_match_v2(self):
+        v2 = SkyhookConfig(controller_version=SKYHOOK_V2_STATE_STRICT_VERSION)
+        v3 = SkyhookConfig(controller_version=SKYHOOK_V3_CANONICAL_VERSION)
+
+        for item in fields(SkyhookConfig):
+            if item.name == "controller_version":
+                continue
+            self.assertEqual(
+                getattr(v2, item.name),
+                getattr(v3, item.name),
+                item.name)
+
+    def test_v3_valid_state_output_equals_v2_output(self):
+        v2 = SkyhookController(_config(
+            controller_version=SKYHOOK_V2_STATE_STRICT_VERSION,
+            max_damper_delta_per_step=0.035))
+        v3 = SkyhookController(_config(
+            controller_version=SKYHOOK_V3_CANONICAL_VERSION,
+            max_damper_delta_per_step=0.035))
+        contexts = (
+            _context(
+                state=VehicleState(vz=1.0, frame=10, dt=0.05),
+                previous_state=VehicleState(frame=9),
+                suspension_state=_FakeSuspensionState(velocities=(-0.5,) * 4)),
+            _context(
+                state=VehicleState(vz=1.0, frame=11, dt=0.05),
+                previous_state=VehicleState(frame=10),
+                suspension_state=_FakeSuspensionState(velocities=(0.5,) * 4)),
+            _context(
+                state=VehicleState(vz=0.001, frame=12, dt=0.05),
+                previous_state=VehicleState(frame=11),
+                suspension_state=_FakeSuspensionState(velocities=(-0.5,) * 4)),
+        )
+
+        for context in contexts:
+            v2_output = v2.compute(context)
+            v3_output = v3.compute(context)
+            self.assertEqual(_springs(v2_output), _springs(v3_output))
+            self.assertEqual(_dampers(v2_output), _dampers(v3_output))
 
     def test_actor_angular_velocity_degrees_are_converted_to_radians(self):
         controller = SkyhookController(_config())
@@ -122,13 +187,13 @@ class SkyhookStateStrictTest(unittest.TestCase):
 
     def test_projected_force_sign_cases(self):
         cases = (
-            (1.0, -0.5, "hard"),
-            (1.0, 0.5, "soft"),
-            (-1.0, 0.5, "hard"),
-            (-1.0, -0.5, "soft"),
+            (1.0, -0.5, 0.5, "projected_feasible", "hard"),
+            (1.0, 0.5, -0.5, "soft_infeasible", "soft"),
+            (-1.0, 0.5, -0.5, "projected_feasible", "hard"),
+            (-1.0, -0.5, 0.5, "soft_infeasible", "soft"),
         )
 
-        for v_sprung, suspension_velocity, expected in cases:
+        for v_sprung, suspension_velocity, v_rel, branch, expected in cases:
             controller = SkyhookController(_config())
             output = controller.compute(_context(
                 state=VehicleState(vz=v_sprung),
@@ -143,6 +208,11 @@ class SkyhookStateStrictTest(unittest.TestCase):
                 self.assertLess(damper, 1.0)
                 self.assertEqual(1, output.diagnostics["soft_mode_fl"])
                 self.assertEqual(0, output.diagnostics["semi_active_feasible_fl"])
+            self.assertEqual(branch, output.diagnostics["target_branch_fl"])
+            self.assertEqual(v_rel, output.diagnostics["v_rel_extension_mps_fl"])
+            self.assertEqual(
+                v_sprung * v_rel,
+                output.diagnostics["skyhook_product_fl"])
 
     def test_deadbands_return_neutral_damping(self):
         controller = SkyhookController(_config(
@@ -158,6 +228,12 @@ class SkyhookStateStrictTest(unittest.TestCase):
         self.assertEqual((1.0, 1.0, 1.0, 1.0), _dampers(rel_deadband))
         self.assertEqual(1, sprung_deadband.diagnostics["neutral_mode_fl"])
         self.assertEqual(1, rel_deadband.diagnostics["neutral_mode_fl"])
+        self.assertEqual(
+            "neutral_sprung_deadband",
+            sprung_deadband.diagnostics["target_branch_fl"])
+        self.assertEqual(
+            "neutral_rel_deadband",
+            rel_deadband.diagnostics["target_branch_fl"])
 
     def test_no_hardening_only_regression(self):
         controller = SkyhookController(_config())
@@ -237,7 +313,107 @@ class SkyhookStateStrictTest(unittest.TestCase):
 
         self.assertEqual(5000.0, output.diagnostics["C_native_fl"])
         self.assertEqual(10000.0, output.diagnostics["C_required_fl"])
+        self.assertEqual(2.0, output.diagnostics["required_scale_unclipped_fl"])
+        self.assertEqual(1.22, output.diagnostics["raw_target_damper_fl"])
+        self.assertEqual(
+            1.22,
+            output.diagnostics["target_after_minmax_clamp_fl"])
         self.assertEqual(1, output.diagnostics["semi_active_feasible_fl"])
+
+    def test_fixed_step_limiter_ignores_dt_for_command_output(self):
+        config = _config(max_damper_delta_per_step=0.02)
+        fast_dt = SkyhookController(config)
+        slow_dt = SkyhookController(config)
+        state = VehicleState(vz=1.0, frame=20)
+        previous_state = VehicleState(frame=19)
+        suspension_state = _FakeSuspensionState(velocities=(-0.5,) * 4)
+
+        fast_output = fast_dt.compute(_context(
+            state=state,
+            previous_state=previous_state,
+            suspension_state=suspension_state,
+            dt=0.01))
+        slow_output = slow_dt.compute(_context(
+            state=state,
+            previous_state=previous_state,
+            suspension_state=suspension_state,
+            dt=0.20))
+
+        self.assertEqual(_dampers(fast_output), _dampers(slow_output))
+        self.assertEqual((1.02, 1.02, 1.02, 1.02), _dampers(fast_output))
+        self.assertEqual(0.02, fast_output.diagnostics[
+            "max_damper_delta_per_step_used"])
+        self.assertEqual(1, slow_output.diagnostics["dt_gap_warning"])
+        self.assertEqual(1, slow_output.diagnostics["frame_delta"])
+
+    def test_invalid_state_resets_previous_damper_scales(self):
+        controller = SkyhookController(_config(max_damper_delta_per_step=0.02))
+        controller.compute(_context(
+            state=VehicleState(vz=1.0),
+            suspension_state=_FakeSuspensionState(velocities=(-0.5,) * 4)))
+        self.assertEqual((1.02, 1.02, 1.02, 1.02), tuple(
+            controller.previous_damper_scales))
+
+        invalid = controller.compute(_context(
+            suspension_state=_FakeSuspensionState(field_valid=False)))
+
+        self.assertEqual((1.0, 1.0, 1.0, 1.0), _dampers(invalid))
+        self.assertEqual((1.0, 1.0, 1.0, 1.0), tuple(
+            controller.previous_damper_scales))
+
+    def test_planning_and_control_inputs_do_not_affect_command_output(self):
+        config = _config(max_damper_delta_per_step=0.02)
+        baseline = SkyhookController(config)
+        with_preview = SkyhookController(config)
+
+        baseline_output = baseline.compute(_context(
+            state=VehicleState(vz=1.0, throttle=0.0, brake=0.0, steer=0.0),
+            suspension_state=_FakeSuspensionState(velocities=(-0.5,) * 4)))
+        preview_output = with_preview.compute(_context(
+            state=VehicleState(vz=1.0, throttle=1.0, brake=0.8, steer=-0.7),
+            planning=PlanningInfo(
+                available=True,
+                source="unit",
+                frame=1,
+                target_speed=(30.0, 0.0),
+                curvature=(0.5, -0.5),
+                throttle=(1.0,),
+                brake=(0.9,),
+                steer=(-0.8,)),
+            suspension_state=_FakeSuspensionState(velocities=(-0.5,) * 4)))
+
+        self.assertEqual(_springs(baseline_output), _springs(preview_output))
+        self.assertEqual(_dampers(baseline_output), _dampers(preview_output))
+
+    def test_vertical_velocity_source_defaults_to_world_z_behavior(self):
+        controller = SkyhookController(_config())
+
+        output = controller.compute(_context(
+            state=VehicleState(vz=1.0, roll_rate=0.0, pitch_rate=0.0),
+            suspension_state=_FakeSuspensionState(velocities=(-0.5,) * 4)))
+
+        self.assertEqual("world_z", controller.config.vertical_velocity_source)
+        self.assertEqual("world_z", output.diagnostics[
+            "vertical_velocity_source"])
+        self.assertEqual(1.0, output.diagnostics["v_world_z"])
+        self.assertEqual(1.0, output.diagnostics["v_sprung_used_fl"])
+
+    def test_startup_prime_diagnostic_keeps_identity_command(self):
+        controller = SkyhookController(_config(max_damper_delta_per_step=0.02))
+        controller.compute(_context(
+            state=VehicleState(vz=1.0),
+            suspension_state=_FakeSuspensionState(velocities=(-0.5,) * 4)))
+        state = _FakeSuspensionState()
+        state.velocity_valid = False
+
+        output = controller.compute(_context(
+            state=VehicleState(frame=2, vz=1.0),
+            suspension_state=state))
+
+        self.assertEqual((1.0, 1.0, 1.0, 1.0), _dampers(output))
+        self.assertEqual(1, output.diagnostics["startup_prime"])
+        self.assertEqual((1.0, 1.0, 1.0, 1.0), tuple(
+            controller.previous_damper_scales))
 
     def test_config_accepts_step05_aliases(self):
         config = SkyhookConfig.from_mapping({

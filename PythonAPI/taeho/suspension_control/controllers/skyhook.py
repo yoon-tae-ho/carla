@@ -20,6 +20,8 @@ from .base import (
 _EPS = 1.0e-9
 _LABELS = ("fl", "fr", "rl", "rr")
 _WHEEL_NAMES = ("FL", "FR", "RL", "RR")
+SKYHOOK_V2_STATE_STRICT_VERSION = "skyhook_v2_state_strict"
+SKYHOOK_V3_CANONICAL_VERSION = "skyhook_v3_canonical"
 
 
 @dataclass(frozen=True)
@@ -32,7 +34,7 @@ class SkyhookConfig:
     invalid.
     """
 
-    controller_version: str = "skyhook_v2_state_strict"
+    controller_version: str = SKYHOOK_V3_CANONICAL_VERSION
     default_dt: float = 0.05
     wheel_count: int = 4
 
@@ -63,6 +65,10 @@ class SkyhookConfig:
 
     angular_velocity_source: str = "actor_getter_deg_s"
     angular_velocity_unit: str = "deg_s"
+    vertical_velocity_source: str = "world_z"
+
+    startup_prime_diagnostics_enabled: bool = True
+    startup_prime_max_frames: int = 3
 
     # Legacy knobs accepted by older configs/callers. They no longer define
     # the law, but keeping them avoids breaking imports that construct
@@ -204,6 +210,7 @@ class SkyhookController(SuspensionController):
                     law_result["final_target_damper"],
                     rel_tol=1.0e-12,
                     abs_tol=1.0e-12))
+            law_result["rate_limited_damper_scale"] = final_damper
             damper_scales.append(final_damper)
             self._add_wheel_diagnostics(
                 diagnostics,
@@ -348,10 +355,32 @@ class SkyhookController(SuspensionController):
         state = context.state
         suspension_state = context.suspension_state
         wheels = tuple(getattr(suspension_state, "wheels", ()) or ())
+        frame = _finite_or_empty(getattr(state, "frame", ""))
+        previous_frame = _finite_or_empty(getattr(
+            context.previous_state,
+            "frame",
+            ""))
+        frame_delta = (
+            int(frame) - int(previous_frame)
+            if _is_finite(frame) and _is_finite(previous_frame) else "")
+        dt = _safe_dt(context.dt, self.config.default_dt)
+        expected_dt = _safe_dt(self.config.default_dt, 0.05)
+        dt_gap_warning = int(
+            (_is_finite(frame_delta) and int(frame_delta) not in (0, 1)) or
+            (_is_finite(dt) and _is_finite(expected_dt) and
+             abs(float(dt) - float(expected_dt)) > 1.0e-6))
+        v_world_z = _safe_float(getattr(state, "vz", 0.0))
         return {
             "controller": self.name,
             "controller_version": self.config.controller_version,
-            "dt": _safe_dt(context.dt, self.config.default_dt),
+            "dt": dt,
+            "expected_dt": expected_dt,
+            "frame": frame,
+            "frame_delta": frame_delta,
+            "dt_gap_warning": dt_gap_warning,
+            "max_damper_delta_per_step_used": max(
+                0.0,
+                _safe_float(self.config.max_damper_delta_per_step)),
             "state_valid": 1,
             "suspension_state_valid": int(bool(state_valid)),
             "contact_valid_all": int(self._contact_valid_all(wheels)),
@@ -363,6 +392,12 @@ class SkyhookController(SuspensionController):
                 "angular_velocity_source"],
             "angular_velocity_unit_converted": angular_diagnostics[
                 "angular_velocity_unit_converted"],
+            "vertical_velocity_source": self.config.vertical_velocity_source,
+            "v_world_z": v_world_z,
+            "startup_prime": int(self._is_startup_prime(
+                state=state,
+                state_valid=state_valid,
+                invalid_reason=invalid_reason)),
             "roll_deg": _finite_or_empty(getattr(state, "roll", "")),
             "pitch_deg": _finite_or_empty(getattr(state, "pitch", "")),
             "yaw_deg": _finite_or_empty(getattr(state, "yaw", "")),
@@ -436,6 +471,7 @@ class SkyhookController(SuspensionController):
             "native_spring_strength_%s" % label: "",
             "native_damper_rate_%s" % label: _finite_or_empty(native_damper),
             "v_sprung_%s" % label: v_sprung,
+            "v_sprung_used_%s" % label: v_sprung,
             "v_roll_%s" % label: v_roll,
             "v_pitch_%s" % label: v_pitch,
             "v_rel_extension_mps_%s" % label: "",
@@ -444,12 +480,20 @@ class SkyhookController(SuspensionController):
             "F_total_ideal_%s" % label: "",
             "C_native_%s" % label: _finite_or_empty(native_damper),
             "C_required_%s" % label: "",
+            "target_branch_%s" % label: "",
+            "skyhook_product_%s" % label: "",
+            "abs_v_sprung_%s" % label: abs(_safe_float(v_sprung)),
+            "abs_v_rel_%s" % label: "",
+            "required_scale_unclipped_%s" % label: "",
+            "raw_target_damper_%s" % label: "",
+            "target_after_minmax_clamp_%s" % label: final_target,
             "semi_active_feasible_%s" % label: "",
             "skyhook_only_target_damper_%s" % label: final_target,
             "final_target_damper_%s" % label: final_target,
             "final_spring_scale_%s" % label: 1.0,
             "final_damper_scale_%s" % label: final_damper,
             "rate_limited_damper_%s" % label: "",
+            "rate_limited_damper_scale_%s" % label: final_damper,
             "clamped_damper_%s" % label: "",
             "soft_mode_%s" % label: "",
             "hard_mode_%s" % label: "",
@@ -502,32 +546,40 @@ class SkyhookController(SuspensionController):
         skyhook_c = max(0.0, _safe_float(cfg.skyhook_c_scale, 1.0)) * native
         f_ideal = -skyhook_c * v_sprung
         product = v_sprung * v_rel_extension
+        abs_v_sprung = abs(v_sprung)
+        abs_v_rel = abs(v_rel_extension)
+        projection_eps = max(_safe_float(cfg.projection_eps), _EPS)
         c_required = (
             -f_ideal / v_rel_extension
-            if abs(v_rel_extension) > max(_safe_float(cfg.projection_eps), _EPS)
+            if abs_v_rel > projection_eps
             else "")
+        required_scale_unclipped = ""
         feasible = 0
         raw_target = _safe_float(cfg.neutral_damper_scale, 1.0)
+        branch = "neutral_sprung_deadband"
 
-        if abs(v_sprung) < max(0.0, _safe_float(cfg.sprung_velocity_deadband)):
+        if abs_v_sprung < max(0.0, _safe_float(cfg.sprung_velocity_deadband)):
             raw_target = _safe_float(cfg.neutral_damper_scale, 1.0)
-        elif abs(v_rel_extension) < max(0.0, _safe_float(cfg.rel_velocity_deadband)):
+            branch = "neutral_sprung_deadband"
+        elif abs_v_rel < max(0.0, _safe_float(cfg.rel_velocity_deadband)):
             raw_target = _safe_float(cfg.neutral_damper_scale, 1.0)
+            branch = "neutral_rel_deadband"
         elif product > max(0.0, _safe_float(cfg.product_deadband)):
             feasible = 1
+            branch = "projected_feasible"
             if str(cfg.skyhook_law).strip().lower() == "switching":
                 raw_target = _safe_float(cfg.high_damper_scale, 1.22)
             else:
-                required = (
-                    skyhook_c * abs(v_sprung) /
-                    max(abs(v_rel_extension), _safe_float(cfg.projection_eps)))
-                c_cmd = clamp(
-                    required,
-                    _safe_float(cfg.low_damper_scale, 0.82) * native,
-                    _safe_float(cfg.high_damper_scale, 1.22) * native)
-                raw_target = c_cmd / native
+                required_scale_unclipped = (
+                    skyhook_c * abs_v_sprung /
+                    max(abs_v_rel, projection_eps)) / native
+                raw_target = clamp(
+                    required_scale_unclipped,
+                    _safe_float(cfg.low_damper_scale, 0.82),
+                    _safe_float(cfg.high_damper_scale, 1.22))
         else:
             raw_target = _safe_float(cfg.low_damper_scale, 0.82)
+            branch = "soft_infeasible"
 
         final_target = clamp(
             raw_target,
@@ -550,12 +602,20 @@ class SkyhookController(SuspensionController):
             "F_total_ideal": f_ideal,
             "C_native": native,
             "C_required": c_required,
+            "target_branch": branch,
+            "skyhook_product": product,
+            "abs_v_sprung": abs_v_sprung,
+            "abs_v_rel": abs_v_rel,
+            "required_scale_unclipped": required_scale_unclipped,
+            "raw_target_damper": raw_target,
+            "target_after_minmax_clamp": final_target,
             "semi_active_feasible": feasible,
             "skyhook_only_target_damper": final_target,
             "final_target_damper": final_target,
             "final_spring_scale": 1.0,
             "final_damper_scale": final_target,
             "rate_limited_damper": 0,
+            "rate_limited_damper_scale": final_target,
             "clamped_damper": clamped,
             "soft_mode": soft,
             "hard_mode": hard,
@@ -646,6 +706,24 @@ class SkyhookController(SuspensionController):
             (x_rear, y_left),
             (x_rear, y_right),
         )
+
+    def _is_startup_prime(
+        self,
+        state: VehicleState,
+        state_valid: bool,
+        invalid_reason: str,
+    ) -> bool:
+        if not bool(self.config.startup_prime_diagnostics_enabled):
+            return False
+        if state_valid:
+            return False
+        if "velocity" not in str(invalid_reason or ""):
+            return False
+        frame = _safe_float(getattr(state, "frame", 0), 0.0)
+        max_frames = max(0, int(_safe_float(
+            self.config.startup_prime_max_frames,
+            3)))
+        return 0 <= int(frame) <= max_frames
 
     def _contact_valid_all(self, wheels: Sequence[Any]) -> bool:
         if not wheels:

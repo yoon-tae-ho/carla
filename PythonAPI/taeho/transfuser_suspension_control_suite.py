@@ -531,6 +531,10 @@ PARD_V2_DIAGNOSTIC_FIELDS = (
 SUSPENSION_STATE_DIAGNOSTIC_FIELDS = (
     "controller_version",
     "dt",
+    "expected_dt",
+    "frame_delta",
+    "dt_gap_warning",
+    "max_damper_delta_per_step_used",
     "state_valid",
     "suspension_state_valid",
     "contact_valid_all",
@@ -540,6 +544,11 @@ SUSPENSION_STATE_DIAGNOSTIC_FIELDS = (
     "identity_fallback_that_would_have_occurred",
     "angular_velocity_source",
     "angular_velocity_unit_converted",
+    "vertical_velocity_source",
+    "v_world_z",
+    "startup_prime",
+    "startup_prime_reason",
+    "startup_prime_frame_count",
     "roll_deg",
     "pitch_deg",
     "yaw_deg",
@@ -597,6 +606,7 @@ SUSPENSION_STATE_DIAGNOSTIC_FIELDS = (
         "native_spring_strength",
         "native_damper_rate",
         "v_sprung",
+        "v_sprung_used",
         "v_roll",
         "v_pitch",
         "v_rel_extension_mps",
@@ -605,12 +615,20 @@ SUSPENSION_STATE_DIAGNOSTIC_FIELDS = (
         "F_total_ideal",
         "C_native",
         "C_required",
+        "target_branch",
+        "skyhook_product",
+        "abs_v_sprung",
+        "abs_v_rel",
+        "required_scale_unclipped",
+        "raw_target_damper",
+        "target_after_minmax_clamp",
         "semi_active_feasible",
         "skyhook_only_target_damper",
         "final_target_damper",
         "final_spring_scale",
         "final_damper_scale",
         "rate_limited_damper",
+        "rate_limited_damper_scale",
         "clamped_damper",
         "roll_softening_guard_active",
         "soft_mode",
@@ -658,6 +676,16 @@ DIAGNOSTIC_FIELDS = (
     "max_spring_scale_readback",
     "min_damper_scale_readback",
     "max_damper_scale_readback",
+    "per_wheel_damper_scale_readback_fl",
+    "per_wheel_damper_scale_readback_fr",
+    "per_wheel_damper_scale_readback_rl",
+    "per_wheel_damper_scale_readback_rr",
+    "per_wheel_spring_scale_readback_fl",
+    "per_wheel_spring_scale_readback_fr",
+    "per_wheel_spring_scale_readback_rl",
+    "per_wheel_spring_scale_readback_rr",
+    "apply_suspension_command_return_value",
+    "apply_success",
     "activity",
     "activity_error",
     "integral_error",
@@ -1422,6 +1450,13 @@ def format_value(value: Any) -> Any:
     return value
 
 
+def sequence_item(values: Any, index: int, default: Any = "") -> Any:
+    try:
+        return values[index]
+    except (IndexError, KeyError, TypeError):
+        return default
+
+
 def write_json(path: str, data: Any) -> None:
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w") as json_file:
@@ -1852,7 +1887,7 @@ class SuspensionExperimentSidecar(threading.Thread):
 
         next_apply_count = self.apply_count_by_actor_id[actor_id] + 1
         verify = self.should_verify(actor_id, next_apply_count)
-        apply_suspension_command(
+        apply_result = apply_suspension_command(
             actor,
             native,
             output.command,
@@ -1877,6 +1912,8 @@ class SuspensionExperimentSidecar(threading.Thread):
             readback_summary = read_suspension_scale_summary(
                 native,
                 actor.get_suspension_physics_control())
+        readback_spring_scales = readback_summary.get("spring_scales", ())
+        readback_damper_scales = readback_summary.get("damper_scales", ())
 
         scales = output.command.as_scale_lists()
         spring_scales = scales["spring_scales"]
@@ -1937,6 +1974,25 @@ class SuspensionExperimentSidecar(threading.Thread):
                 "min_damper_scale", ""),
             "max_damper_scale_readback": readback_summary.get(
                 "max_damper_scale", ""),
+            "per_wheel_damper_scale_readback_fl": sequence_item(
+                readback_damper_scales, 0),
+            "per_wheel_damper_scale_readback_fr": sequence_item(
+                readback_damper_scales, 1),
+            "per_wheel_damper_scale_readback_rl": sequence_item(
+                readback_damper_scales, 2),
+            "per_wheel_damper_scale_readback_rr": sequence_item(
+                readback_damper_scales, 3),
+            "per_wheel_spring_scale_readback_fl": sequence_item(
+                readback_spring_scales, 0),
+            "per_wheel_spring_scale_readback_fr": sequence_item(
+                readback_spring_scales, 1),
+            "per_wheel_spring_scale_readback_rl": sequence_item(
+                readback_spring_scales, 2),
+            "per_wheel_spring_scale_readback_rr": sequence_item(
+                readback_spring_scales, 3),
+            "apply_suspension_command_return_value": type(
+                apply_result).__name__,
+            "apply_success": 1,
         })
         row.update(planning_diagnostics(planning, current_frame=state.frame))
         row.update(output_diagnostics)
