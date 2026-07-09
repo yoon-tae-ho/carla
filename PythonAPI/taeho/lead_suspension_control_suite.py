@@ -251,6 +251,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
                 "target_speed_schedule_shadow,"
                 "target_speed_schedule_v0_safe,"
                 "skyhook_roll,"
+                "skyhook_roll_v3,"
                 "skyhook_roll_yaw,"
                 "skyhook_estimator_dryrun,"
                 "constant_damper_1p02,"

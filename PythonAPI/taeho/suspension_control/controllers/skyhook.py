@@ -108,6 +108,98 @@ class SkyhookConfig:
         return cls(**kwargs)
 
 
+def canonical_skyhook_v3_projection(
+    *,
+    v_eff_i: float,
+    v_rel_extension_i: float,
+    C_native_i: float,
+    C_sky_i: float,
+    config: SkyhookConfig,
+) -> Dict[str, Any]:
+    """Return the canonical skyhook_v3 per-wheel damper target."""
+    native = max(_safe_float(C_native_i, 0.0), _EPS)
+    skyhook_c = max(0.0, _safe_float(C_sky_i, 0.0))
+    v_eff = _safe_float(v_eff_i)
+    v_rel = _safe_float(v_rel_extension_i)
+    f_ideal = -skyhook_c * v_eff
+    product = v_eff * v_rel
+    abs_v_eff = abs(v_eff)
+    abs_v_rel = abs(v_rel)
+    projection_eps = max(_safe_float(config.projection_eps), _EPS)
+    c_required = (
+        -f_ideal / v_rel
+        if abs_v_rel > projection_eps
+        else "")
+    required_scale_unclipped = ""
+    feasible = 0
+    raw_target = _safe_float(config.neutral_damper_scale, 1.0)
+    branch = "neutral_sprung_deadband"
+
+    if abs_v_eff < max(0.0, _safe_float(config.sprung_velocity_deadband)):
+        raw_target = _safe_float(config.neutral_damper_scale, 1.0)
+        branch = "neutral_sprung_deadband"
+    elif abs_v_rel < max(0.0, _safe_float(config.rel_velocity_deadband)):
+        raw_target = _safe_float(config.neutral_damper_scale, 1.0)
+        branch = "neutral_rel_deadband"
+    elif product > max(0.0, _safe_float(config.product_deadband)):
+        feasible = 1
+        branch = "projected_feasible"
+        if str(config.skyhook_law).strip().lower() == "switching":
+            raw_target = _safe_float(config.high_damper_scale, 1.22)
+        else:
+            required_scale_unclipped = (
+                skyhook_c * abs_v_eff /
+                max(abs_v_rel, projection_eps)) / native
+            raw_target = clamp(
+                required_scale_unclipped,
+                _safe_float(config.low_damper_scale, 0.82),
+                _safe_float(config.high_damper_scale, 1.22))
+    else:
+        raw_target = _safe_float(config.low_damper_scale, 0.82)
+        branch = "soft_infeasible"
+
+    final_target = clamp(
+        raw_target,
+        _safe_float(config.min_damper_scale, 0.75),
+        _safe_float(config.max_damper_scale, 1.25))
+    clamped = int(not math.isclose(
+        raw_target,
+        final_target,
+        rel_tol=1.0e-12,
+        abs_tol=1.0e-12))
+    neutral = _safe_float(config.neutral_damper_scale, 1.0)
+    soft = int(final_target < neutral - 1.0e-12)
+    hard = int(final_target > neutral + 1.0e-12)
+    neutral_mode = int(not soft and not hard)
+
+    return {
+        "v_rel_extension_mps": v_rel,
+        "F_sky_ideal": f_ideal,
+        "F_roll_ideal": 0.0,
+        "F_total_ideal": f_ideal,
+        "C_native": native,
+        "C_required": c_required,
+        "target_branch": branch,
+        "skyhook_product": product,
+        "abs_v_sprung": abs_v_eff,
+        "abs_v_rel": abs_v_rel,
+        "required_scale_unclipped": required_scale_unclipped,
+        "raw_target_damper": raw_target,
+        "target_after_minmax_clamp": final_target,
+        "semi_active_feasible": feasible,
+        "skyhook_only_target_damper": final_target,
+        "final_target_damper": final_target,
+        "final_spring_scale": 1.0,
+        "final_damper_scale": final_target,
+        "rate_limited_damper": 0,
+        "rate_limited_damper_scale": final_target,
+        "clamped_damper": clamped,
+        "soft_mode": soft,
+        "hard_mode": hard,
+        "neutral_mode": neutral_mode,
+    }
+
+
 class SkyhookController(SuspensionController):
     """Per-wheel projected-force semi-active skyhook controller."""
 
@@ -544,83 +636,12 @@ class SkyhookController(SuspensionController):
         cfg = self.config
         native = max(_safe_float(native_damper, 0.0), _EPS)
         skyhook_c = max(0.0, _safe_float(cfg.skyhook_c_scale, 1.0)) * native
-        f_ideal = -skyhook_c * v_sprung
-        product = v_sprung * v_rel_extension
-        abs_v_sprung = abs(v_sprung)
-        abs_v_rel = abs(v_rel_extension)
-        projection_eps = max(_safe_float(cfg.projection_eps), _EPS)
-        c_required = (
-            -f_ideal / v_rel_extension
-            if abs_v_rel > projection_eps
-            else "")
-        required_scale_unclipped = ""
-        feasible = 0
-        raw_target = _safe_float(cfg.neutral_damper_scale, 1.0)
-        branch = "neutral_sprung_deadband"
-
-        if abs_v_sprung < max(0.0, _safe_float(cfg.sprung_velocity_deadband)):
-            raw_target = _safe_float(cfg.neutral_damper_scale, 1.0)
-            branch = "neutral_sprung_deadband"
-        elif abs_v_rel < max(0.0, _safe_float(cfg.rel_velocity_deadband)):
-            raw_target = _safe_float(cfg.neutral_damper_scale, 1.0)
-            branch = "neutral_rel_deadband"
-        elif product > max(0.0, _safe_float(cfg.product_deadband)):
-            feasible = 1
-            branch = "projected_feasible"
-            if str(cfg.skyhook_law).strip().lower() == "switching":
-                raw_target = _safe_float(cfg.high_damper_scale, 1.22)
-            else:
-                required_scale_unclipped = (
-                    skyhook_c * abs_v_sprung /
-                    max(abs_v_rel, projection_eps)) / native
-                raw_target = clamp(
-                    required_scale_unclipped,
-                    _safe_float(cfg.low_damper_scale, 0.82),
-                    _safe_float(cfg.high_damper_scale, 1.22))
-        else:
-            raw_target = _safe_float(cfg.low_damper_scale, 0.82)
-            branch = "soft_infeasible"
-
-        final_target = clamp(
-            raw_target,
-            _safe_float(cfg.min_damper_scale, 0.75),
-            _safe_float(cfg.max_damper_scale, 1.25))
-        clamped = int(not math.isclose(
-            raw_target,
-            final_target,
-            rel_tol=1.0e-12,
-            abs_tol=1.0e-12))
-        neutral = _safe_float(cfg.neutral_damper_scale, 1.0)
-        soft = int(final_target < neutral - 1.0e-12)
-        hard = int(final_target > neutral + 1.0e-12)
-        neutral_mode = int(not soft and not hard)
-
-        return {
-            "v_rel_extension_mps": v_rel_extension,
-            "F_sky_ideal": f_ideal,
-            "F_roll_ideal": 0.0,
-            "F_total_ideal": f_ideal,
-            "C_native": native,
-            "C_required": c_required,
-            "target_branch": branch,
-            "skyhook_product": product,
-            "abs_v_sprung": abs_v_sprung,
-            "abs_v_rel": abs_v_rel,
-            "required_scale_unclipped": required_scale_unclipped,
-            "raw_target_damper": raw_target,
-            "target_after_minmax_clamp": final_target,
-            "semi_active_feasible": feasible,
-            "skyhook_only_target_damper": final_target,
-            "final_target_damper": final_target,
-            "final_spring_scale": 1.0,
-            "final_damper_scale": final_target,
-            "rate_limited_damper": 0,
-            "rate_limited_damper_scale": final_target,
-            "clamped_damper": clamped,
-            "soft_mode": soft,
-            "hard_mode": hard,
-            "neutral_mode": neutral_mode,
-        }
+        return canonical_skyhook_v3_projection(
+            v_eff_i=v_sprung,
+            v_rel_extension_i=v_rel_extension,
+            C_native_i=native,
+            C_sky_i=skyhook_c,
+            config=cfg)
 
     def _rate_limit_damper(self, index: int, desired_damper_scale: float) -> float:
         max_delta = max(0.0, _safe_float(self.config.max_damper_delta_per_step))

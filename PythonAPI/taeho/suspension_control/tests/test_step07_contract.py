@@ -31,6 +31,10 @@ from suspension_control.controllers.planning_aware_skyhook_roll import (
 )
 from suspension_control.controllers.skyhook import SkyhookController
 from suspension_control.controllers.skyhook_roll import SkyhookRollController
+from suspension_control.controllers.skyhook_roll_v3 import (
+    SKYHOOK_ROLL_V3_CANONICAL_MODAL_VERSION,
+    SkyhookRollV3CanonicalModalController,
+)
 from suspension_control.controllers.target_speed_schedule import (
     TargetSpeedScheduleConfig,
     TargetSpeedScheduleController,
@@ -252,7 +256,8 @@ class Step07SuiteSelectionTest(unittest.TestCase):
             "skyhook_roll,skyhook_roll_yaw,skyhook_estimator_dryrun,"
             "constant_damper_1p02,pard_v2_shadow,"
             "pard_v2_active_ultra_safe,pard_v2_active_safe_1p06,"
-            "pard_v2_active_aggressive_0p75_1p25,planning_aware")
+            "pard_v2_active_aggressive_0p75_1p25,planning_aware,"
+            "skyhook_roll_v3")
 
         self.assertEqual(
             [
@@ -269,13 +274,15 @@ class Step07SuiteSelectionTest(unittest.TestCase):
                 "S25_pard_v2_active_safe_1p06",
                 "S26_pard_v2_active_aggressive_0p75_1p25",
                 "S27_planning_aware",
+                "S28_skyhook_roll_v3",
             ],
             [scenario["name"] for scenario in scenarios])
 
     def test_new_scenarios_are_selectable_by_code(self):
         import transfuser_suspension_control_suite as suite
 
-        scenarios = suite.selected_scenarios("S19,S20,S21,S22,S23,S24,S25,S26,S27")
+        scenarios = suite.selected_scenarios(
+            "S19,S20,S21,S22,S23,S24,S25,S26,S27,S28")
 
         self.assertEqual(
             [
@@ -288,8 +295,25 @@ class Step07SuiteSelectionTest(unittest.TestCase):
                 "S25_pard_v2_active_safe_1p06",
                 "S26_pard_v2_active_aggressive_0p75_1p25",
                 "S27_planning_aware",
+                "S28_skyhook_roll_v3",
             ],
             [scenario["name"] for scenario in scenarios])
+
+    def test_skyhook_roll_v3_is_selectable_by_key_and_code(self):
+        import transfuser_suspension_control_suite as suite
+
+        by_key = suite.selected_scenarios("skyhook_roll_v3")
+        by_code = suite.selected_scenarios("S28")
+
+        expected = {
+            "name": "S28_skyhook_roll_v3",
+            "label": "S28 canonical skyhook + modal roll-rate damping",
+            "controller": "skyhook_roll_v3",
+            "uses_suspension_api": True,
+            "needs_suspension_state": True,
+        }
+        self.assertEqual([expected], by_key)
+        self.assertEqual([expected], by_code)
 
     def test_pard_scenario_aliases_select_ultra_safe(self):
         import transfuser_suspension_control_suite as suite
@@ -315,6 +339,7 @@ class Step07SuiteSelectionTest(unittest.TestCase):
         safe = suite.make_controller("target_speed_schedule_safe", args)
         skyhook = suite.make_controller("skyhook", args)
         skyhook_roll = suite.make_controller("skyhook_roll", args)
+        skyhook_roll_v3 = suite.make_controller("skyhook_roll_v3", args)
         skyhook_roll_yaw = suite.make_controller("skyhook_roll_yaw", args)
         dryrun = suite.make_controller("skyhook_estimator_dryrun", args)
         pard_shadow = suite.make_controller(
@@ -339,6 +364,9 @@ class Step07SuiteSelectionTest(unittest.TestCase):
         self.assertIsInstance(safe, TargetSpeedScheduleController)
         self.assertIsInstance(skyhook, SkyhookController)
         self.assertIsInstance(skyhook_roll, SkyhookRollController)
+        self.assertIsInstance(
+            skyhook_roll_v3,
+            SkyhookRollV3CanonicalModalController)
         self.assertIsInstance(skyhook_roll_yaw, SkyhookRollController)
         self.assertIsInstance(dryrun, SkyhookEstimatorDryRunController)
         self.assertIsInstance(pard_shadow, PlanningAwareRiskDampingController)
@@ -358,6 +386,10 @@ class Step07SuiteSelectionTest(unittest.TestCase):
             pard_aggressive.config.damper_schedule_mode)
         self.assertTrue(skyhook.requires_suspension_state)
         self.assertFalse(skyhook_roll.config.enable_yaw_distribution)
+        self.assertEqual(
+            SKYHOOK_ROLL_V3_CANONICAL_MODAL_VERSION,
+            skyhook_roll_v3.config.controller_version)
+        self.assertTrue(skyhook_roll_v3.requires_suspension_state)
         self.assertTrue(skyhook_roll_yaw.config.enable_yaw_distribution)
         self.assertEqual(
             "log_only",
@@ -443,6 +475,9 @@ class Step07SuiteSelectionTest(unittest.TestCase):
 
         self.assertEqual("stock,identity,pid", tfpp_args.scenarios)
         self.assertEqual("stock,identity,skyhook", lead_args.scenarios)
+        self.assertEqual(
+            suite.DEFAULT_SKYHOOK_ROLL_V3_CONFIG,
+            tfpp_args.skyhook_roll_v3_config)
 
     def test_skyhook_roll_help_mentions_new_scenarios(self):
         import lead_suspension_control_suite as lead_suite
@@ -454,6 +489,7 @@ class Step07SuiteSelectionTest(unittest.TestCase):
         for help_text in (tfpp_help, lead_help):
             compact_help = "".join(help_text.split())
             self.assertIn("skyhook_roll", compact_help)
+            self.assertIn("skyhook_roll_v3", compact_help)
             self.assertIn("skyhook_roll_yaw", compact_help)
             self.assertIn("skyhook_estimator_dryrun", compact_help)
             self.assertIn("constant_damper_1p02", compact_help)
@@ -461,6 +497,7 @@ class Step07SuiteSelectionTest(unittest.TestCase):
             self.assertIn("pard_v2_active_ultra_safe", compact_help)
             self.assertIn("pard_v2_active_safe_1p06", compact_help)
         self.assertIn("--skyhook-roll-config", tfpp_help)
+        self.assertIn("--skyhook-roll-v3-config", tfpp_help)
         self.assertIn("--skyhook-roll-yaw-config", tfpp_help)
         self.assertIn("--skyhook-estimator-dryrun-config", tfpp_help)
         self.assertIn("--constant-damper-1p02-config", tfpp_help)
@@ -720,6 +757,69 @@ class Step07SuiteSelectionTest(unittest.TestCase):
         required_fields = list(scalar_fields) + list(readback_fields)
         for label in wheel_labels:
             for field in existing_per_wheel_fields + v3_per_wheel_fields:
+                required_fields.append("%s_%s" % (field, label))
+
+        missing = [
+            field for field in required_fields
+            if field not in suite.DIAGNOSTIC_FIELDS
+        ]
+
+        self.assertEqual([], missing)
+
+    def test_skyhook_roll_v3_canonical_modal_csv_contract_fields_registered(self):
+        import transfuser_suspension_control_suite as suite
+
+        scalar_fields = (
+            "controller",
+            "controller_name",
+            "controller_version",
+            "skyhook_roll_v3_mode",
+            "roll_modal_enabled",
+            "roll_modal_c_scale",
+            "roll_modal_distribution",
+            "roll_rate_rad_s",
+            "roll_rate_deg_s",
+            "C_phi",
+            "Q_roll_des",
+            "roll_distribution_denom",
+            "roll_modal_valid",
+            "roll_residual_heave_sum",
+            "roll_residual_pitch_sum",
+            "roll_residual_roll_moment",
+            "roll_angle_used_in_command",
+            "local_ay_used_in_command",
+            "yaw_used_in_command",
+            "planning_preview_used_in_command",
+            "spring_used_in_command",
+            "dt",
+            "expected_dt",
+            "frame_delta",
+            "dt_gap_warning",
+        )
+        per_wheel_fields = (
+            "x",
+            "y",
+            "C_native",
+            "C_sky",
+            "v_s_base",
+            "v_rel_extension_mps",
+            "F_sky_ideal",
+            "F_roll_modal",
+            "F_total_ideal",
+            "v_eff_total",
+            "base_target_damper",
+            "total_raw_target_damper",
+            "total_target_branch",
+            "total_product",
+            "total_required_scale_unclipped",
+            "total_target_damper",
+            "final_spring_scale",
+            "final_damper_scale",
+            "rate_limited_damper",
+        )
+        required_fields = list(scalar_fields)
+        for label in ("fl", "fr", "rl", "rr"):
+            for field in per_wheel_fields:
                 required_fields.append("%s_%s" % (field, label))
 
         missing = [

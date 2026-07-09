@@ -16,6 +16,7 @@ from suspension_control.controllers.skyhook import (
     SKYHOOK_V3_CANONICAL_VERSION,
     SkyhookConfig,
     SkyhookController,
+    canonical_skyhook_v3_projection,
 )
 
 
@@ -319,6 +320,100 @@ class SkyhookStateStrictTest(unittest.TestCase):
             1.22,
             output.diagnostics["target_after_minmax_clamp_fl"])
         self.assertEqual(1, output.diagnostics["semi_active_feasible_fl"])
+
+    def test_canonical_projection_helper_matches_controller_wrapper(self):
+        config = _config(
+            sprung_velocity_deadband=0.025,
+            rel_velocity_deadband=0.015)
+        controller = SkyhookController(config)
+        native = 5000.0
+        c_sky = native * config.skyhook_c_scale
+        cases = (
+            (1.0, 0.5, "projected_feasible"),
+            (1.0, -0.5, "soft_infeasible"),
+            (0.001, 0.5, "neutral_sprung_deadband"),
+            (1.0, 0.001, "neutral_rel_deadband"),
+        )
+
+        for v_eff, v_rel, expected_branch in cases:
+            helper = canonical_skyhook_v3_projection(
+                v_eff_i=v_eff,
+                v_rel_extension_i=v_rel,
+                C_native_i=native,
+                C_sky_i=c_sky,
+                config=config)
+            wrapper = controller._target_damper_scale(
+                v_sprung=v_eff,
+                v_rel_extension=v_rel,
+                native_damper=native)
+
+            self.assertEqual(wrapper, helper)
+            self.assertEqual(expected_branch, helper["target_branch"])
+
+    def test_canonical_projection_helper_reports_diagnostics(self):
+        result = canonical_skyhook_v3_projection(
+            v_eff_i=1.0,
+            v_rel_extension_i=0.5,
+            C_native_i=5000.0,
+            C_sky_i=5000.0,
+            config=_config())
+
+        self.assertEqual("projected_feasible", result["target_branch"])
+        self.assertEqual(0.5, result["skyhook_product"])
+        self.assertEqual(10000.0, result["C_required"])
+        self.assertEqual(2.0, result["required_scale_unclipped"])
+        self.assertEqual(1.22, result["raw_target_damper"])
+        self.assertEqual(1.22, result["target_after_minmax_clamp"])
+        self.assertEqual(1.22, result["final_target_damper"])
+        self.assertEqual(1, result["semi_active_feasible"])
+        self.assertEqual(1, result["hard_mode"])
+        self.assertEqual(0, result["soft_mode"])
+        self.assertEqual(0, result["neutral_mode"])
+
+    def test_valid_compute_output_matches_canonical_projection_helper(self):
+        config = _config()
+        controller = SkyhookController(config)
+        output = controller.compute(_context(
+            state=VehicleState(vz=1.0),
+            suspension_state=_FakeSuspensionState(velocities=(-0.5,) * 4),
+            native_dampers=(5000.0, 4500.0, 4000.0, 3500.0)))
+        helper = canonical_skyhook_v3_projection(
+            v_eff_i=1.0,
+            v_rel_extension_i=0.5,
+            C_native_i=5000.0,
+            C_sky_i=5000.0,
+            config=config)
+
+        self.assertEqual(helper["final_target_damper"], _dampers(output)[0])
+        for field_name in (
+                "target_branch",
+                "skyhook_product",
+                "required_scale_unclipped",
+                "raw_target_damper",
+                "target_after_minmax_clamp",
+                "final_target_damper"):
+            self.assertEqual(
+                helper[field_name],
+                output.diagnostics["%s_fl" % field_name])
+
+    def test_switching_law_compatibility_stays_in_projection_helper(self):
+        config = _config(skyhook_law="switching")
+        controller = SkyhookController(config)
+        helper = canonical_skyhook_v3_projection(
+            v_eff_i=1.0,
+            v_rel_extension_i=0.5,
+            C_native_i=4500.0,
+            C_sky_i=4500.0,
+            config=config)
+        wrapper = controller._target_damper_scale(
+            v_sprung=1.0,
+            v_rel_extension=0.5,
+            native_damper=4500.0)
+
+        self.assertEqual(wrapper, helper)
+        self.assertEqual("projected_feasible", helper["target_branch"])
+        self.assertEqual("", helper["required_scale_unclipped"])
+        self.assertEqual(config.high_damper_scale, helper["raw_target_damper"])
 
     def test_fixed_step_limiter_ignores_dt_for_command_output(self):
         config = _config(max_damper_delta_per_step=0.02)

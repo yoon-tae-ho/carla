@@ -1,0 +1,64 @@
+# Default config for controllers.skyhook_roll_v3.SkyhookRollV3CanonicalModalController.
+
+controller_version: skyhook_roll_v3_canonical_modal_roll_rate
+default_dt: 0.05
+wheel_count: 4
+
+# Geometry and angular-rate convention match skyhook_v3_canonical.
+half_wheelbase_m: 1.45
+half_track_m: 0.85
+front_x_sign: 1.0
+left_y_sign: -1.0
+angular_velocity_source: actor_getter_deg_s
+angular_velocity_unit: deg_s
+vertical_velocity_source: world_z
+
+# State source and strict fallback.
+require_suspension_state: true
+identity_if_any_wheel_invalid: true
+require_contact_valid: true
+require_velocity: true
+relative_extension_sign: -1.0
+
+# Damper-only canonical projected-force skyhook law.
+skyhook_law: projected_force
+skyhook_c_scale: 1.0
+neutral_damper_scale: 1.0
+low_damper_scale: 0.82
+high_damper_scale: 1.22
+min_damper_scale: 0.75
+max_damper_scale: 1.25
+max_damper_delta_per_step: 0.035
+
+# Deadbands and safety.
+sprung_velocity_deadband: 0.025
+rel_velocity_deadband: 0.015
+product_deadband: 0.0005
+projection_eps: 0.000001
+
+# Pure modal roll-rate residual. No roll angle, lateral acceleration, yaw,
+# planning preview, spring, side, or axle-distribution command terms apply.
+roll_modal_enabled: true
+roll_modal_c_scale: 0.20
+roll_modal_distribution: geometry_min_norm
+
+use_roll_angle_feedback: false
+use_lateral_accel_gate: false
+use_outer_side_bias: false
+use_front_rear_roll_distribution: false
+enable_yaw_distribution: false
+use_planning_preview: false
+
+roll_spring_enabled: false
+enable_roll_spring_control: false
+base_spring_scale: 1.0
+min_spring_scale: 1.0
+max_spring_scale: 1.0
+max_spring_delta_per_step: 0.0
+
+# Startup invalid velocity-cache rows are diagnostic-only and still command
+# identity.
+startup_prime_diagnostics_enabled: true
+startup_prime_max_frames: 3
+
+debug: false

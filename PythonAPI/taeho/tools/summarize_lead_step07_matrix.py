@@ -42,6 +42,7 @@ SIDECAR_SCENARIOS = {
     "LEAD_identity_jsonl",
     "LEAD_skyhook",
     "LEAD_skyhook_roll",
+    "LEAD_skyhook_roll_v3",
     "LEAD_planning_aware",
     "LEAD_constant_damper_1.02",
     "LEAD_constant_damper_1.03",

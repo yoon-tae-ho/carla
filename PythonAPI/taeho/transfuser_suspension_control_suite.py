@@ -30,6 +30,8 @@ Optional scenario:
                        apply PARD v2 1.06 sensitivity config
   S26_pard_v2_active_aggressive_0p75_1p25:
                        apply PARD v2 centered 0.75-1.25 experimental config
+  S28_skyhook_roll_v3:
+                       apply canonical skyhook + modal roll-rate damping
 """
 
 from __future__ import annotations
@@ -82,6 +84,10 @@ from suspension_control.controllers.skyhook import SkyhookConfig, SkyhookControl
 from suspension_control.controllers.skyhook_roll import (
     SkyhookRollConfig,
     SkyhookRollController,
+)
+from suspension_control.controllers.skyhook_roll_v3 import (
+    SkyhookRollV3CanonicalModalConfig,
+    SkyhookRollV3CanonicalModalController,
 )
 from suspension_control.controllers.target_speed_schedule import (
     TargetSpeedScheduleConfig,
@@ -138,6 +144,8 @@ DEFAULT_SKYHOOK_ESTIMATOR_DRYRUN_CONFIG = os.path.join(
     "skyhook_estimator_dryrun.yaml")
 DEFAULT_SKYHOOK_ROLL_CONFIG = os.path.join(
     SCRIPT_DIR, "suspension_control", "configs", "skyhook_roll.yaml")
+DEFAULT_SKYHOOK_ROLL_V3_CONFIG = os.path.join(
+    SCRIPT_DIR, "suspension_control", "configs", "skyhook_roll_v3.yaml")
 DEFAULT_SKYHOOK_ROLL_YAW_CONFIG = os.path.join(
     SCRIPT_DIR, "suspension_control", "configs", "skyhook_roll_yaw.yaml")
 DEFAULT_CONSTANT_SCALE_CONFIG = os.path.join(
@@ -376,6 +384,13 @@ SCENARIOS = OrderedDict((
         "name": "S27_planning_aware",
         "label": "S27 planning-aware skyhook-roll",
         "controller": "planning_aware",
+        "uses_suspension_api": True,
+        "needs_suspension_state": True,
+    }),
+    ("skyhook_roll_v3", {
+        "name": "S28_skyhook_roll_v3",
+        "label": "S28 canonical skyhook + modal roll-rate damping",
+        "controller": "skyhook_roll_v3",
         "uses_suspension_api": True,
         "needs_suspension_state": True,
     }),
@@ -649,6 +664,43 @@ SUSPENSION_STATE_DIAGNOSTIC_FIELDS = (
     )
 )
 
+SKYHOOK_ROLL_V3_DIAGNOSTIC_FIELDS = (
+    "skyhook_roll_v3_mode",
+    "roll_modal_enabled",
+    "roll_modal_c_scale",
+    "roll_modal_distribution",
+    "roll_rate_deg_s",
+    "C_phi",
+    "Q_roll_des",
+    "roll_distribution_denom",
+    "roll_modal_valid",
+    "roll_residual_heave_sum",
+    "roll_residual_pitch_sum",
+    "roll_residual_roll_moment",
+    "roll_angle_used_in_command",
+    "local_ay_used_in_command",
+    "yaw_used_in_command",
+    "planning_preview_used_in_command",
+    "spring_used_in_command",
+) + tuple(
+    "%s_%s" % (field, label)
+    for label in WHEEL_DIAGNOSTIC_LABELS
+    for field in (
+        "x",
+        "y",
+        "C_sky",
+        "v_s_base",
+        "F_roll_modal",
+        "v_eff_total",
+        "base_target_damper",
+        "total_raw_target_damper",
+        "total_target_branch",
+        "total_product",
+        "total_required_scale_unclipped",
+        "total_target_damper",
+    )
+)
+
 DIAGNOSTIC_FIELDS = (
     "wall_time",
     "scenario",
@@ -664,7 +716,7 @@ DIAGNOSTIC_FIELDS = (
     "roll",
     "local_ay",
     "yaw_rate",
-) + SUSPENSION_STATE_DIAGNOSTIC_FIELDS + (
+) + SUSPENSION_STATE_DIAGNOSTIC_FIELDS + SKYHOOK_ROLL_V3_DIAGNOSTIC_FIELDS + (
     "command_applied",
     "apply_count",
     "verify_count",
@@ -1126,6 +1178,12 @@ def build_skyhook_roll_config(path: str) -> SkyhookRollConfig:
     return SkyhookRollConfig()
 
 
+def build_skyhook_roll_v3_config(path: str) -> SkyhookRollV3CanonicalModalConfig:
+    if path and os.path.isfile(path):
+        return SkyhookRollV3CanonicalModalConfig.from_mapping(read_flat_yaml(path))
+    return SkyhookRollV3CanonicalModalConfig()
+
+
 def build_constant_scale_config(path: str) -> ConstantScaleConfig:
     if path and os.path.isfile(path):
         return ConstantScaleConfig.from_mapping(read_flat_yaml(path))
@@ -1290,6 +1348,9 @@ def make_controller(controller_name: str, args: argparse.Namespace):
     if controller_name == "skyhook_roll":
         return SkyhookRollController(build_skyhook_roll_config(
             args.skyhook_roll_config))
+    if controller_name == "skyhook_roll_v3":
+        return SkyhookRollV3CanonicalModalController(
+            build_skyhook_roll_v3_config(args.skyhook_roll_v3_config))
     if controller_name == "skyhook_roll_yaw":
         return SkyhookRollController(build_skyhook_roll_config(
             args.skyhook_roll_yaw_config))
@@ -4741,6 +4802,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "target_speed_schedule_shadow,"
         "target_speed_schedule_v0_safe,"
         "skyhook_roll,"
+        "skyhook_roll_v3,"
         "skyhook_roll_yaw,"
         "skyhook_estimator_dryrun,"
         "constant_damper_1p02,"
@@ -4779,6 +4841,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--skyhook-roll-config",
         default=DEFAULT_SKYHOOK_ROLL_CONFIG,
         help="flat YAML skyhook+roll config path")
+    parser.add_argument(
+        "--skyhook-roll-v3-config",
+        default=DEFAULT_SKYHOOK_ROLL_V3_CONFIG,
+        help="flat YAML canonical skyhook+modal roll-rate config path")
     parser.add_argument(
         "--skyhook-roll-yaw-config",
         default=DEFAULT_SKYHOOK_ROLL_YAW_CONFIG,
