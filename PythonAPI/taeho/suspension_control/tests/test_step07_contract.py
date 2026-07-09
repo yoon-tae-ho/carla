@@ -496,6 +496,11 @@ class Step07SuiteSelectionTest(unittest.TestCase):
             self.assertIn("pard_v2_shadow", compact_help)
             self.assertIn("pard_v2_active_ultra_safe", compact_help)
             self.assertIn("pard_v2_active_safe_1p06", compact_help)
+            self.assertIn("planning_aware_v3_mpc_primary_safe", compact_help)
+            self.assertIn(
+                "planning_aware_v3_mpc_primary_authority",
+                compact_help)
+            self.assertIn("planning_aware_v3_mpc_skyhook_prior", compact_help)
         self.assertIn("--skyhook-roll-config", tfpp_help)
         self.assertIn("--skyhook-roll-v3-config", tfpp_help)
         self.assertIn("--skyhook-roll-yaw-config", tfpp_help)
@@ -507,6 +512,13 @@ class Step07SuiteSelectionTest(unittest.TestCase):
         self.assertIn("--planning-aware-risk-damping-shadow-config", tfpp_help)
         self.assertIn(
             "--planning-aware-risk-damping-safe-1p06-config",
+            tfpp_help)
+        self.assertIn("--planning-aware-v3-mpc-primary-safe-config", tfpp_help)
+        self.assertIn(
+            "--planning-aware-v3-mpc-primary-authority-config",
+            tfpp_help)
+        self.assertIn(
+            "--planning-aware-v3-mpc-skyhook-prior-config",
             tfpp_help)
 
     def test_new_diagnostics_are_registered(self):
@@ -896,6 +908,58 @@ class Step07SuiteSelectionTest(unittest.TestCase):
 
 class Step07RunnerMappingTest(unittest.TestCase):
 
+    def test_matrix_runner_maps_planning_aware_v3_mpc_primary_jsonl(self):
+        sim_root = _sim_root()
+        script = os.path.join(sim_root, "scripts", "run_lead_step07_matrix.sh")
+        scenarios = ",".join((
+            "LEAD_planning_aware_v3_mpc_primary_safe",
+            "LEAD_planning_aware_v3_mpc_primary_authority",
+            "LEAD_planning_aware_v3_mpc_skyhook_prior",
+        ))
+
+        result = subprocess.run(
+            [
+                "bash",
+                script,
+                "--mode",
+                "smoke",
+                "--seeds",
+                "111",
+                "--scenarios",
+                scenarios,
+                "--dry-run",
+                "--skip-preflight",
+                "--skip-summary",
+                "--no-restart-carla-per-run",
+            ],
+            cwd=sim_root,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=60)
+
+        self.assertEqual(
+            0,
+            result.returncode,
+            msg=result.stdout[-4000:] + result.stderr[-4000:])
+        output = result.stdout
+        self.assertIn(
+            "scenario=LEAD_planning_aware_v3_mpc_primary_safe kind=sidecar",
+            output)
+        self.assertIn(
+            "scenario=LEAD_planning_aware_v3_mpc_primary_authority kind=sidecar",
+            output)
+        self.assertIn(
+            "scenario=LEAD_planning_aware_v3_mpc_skyhook_prior kind=sidecar",
+            output)
+        self.assertIn("--scenarios planning_aware_v3_mpc_primary_safe", output)
+        self.assertIn(
+            "--scenarios planning_aware_v3_mpc_primary_authority",
+            output)
+        self.assertIn("--scenarios planning_aware_v3_mpc_skyhook_prior", output)
+        self.assertEqual(3, output.count("--planning-provider jsonl"))
+        self.assertEqual(3, output.count("--planning-preview-jsonl"))
+
     def test_matrix_runner_dry_run_maps_new_scenarios(self):
         sim_root = _sim_root()
         script = os.path.join(sim_root, "scripts", "run_lead_step07_matrix.sh")
@@ -972,6 +1036,87 @@ class Step07RunnerMappingTest(unittest.TestCase):
         self.assertIn("--scenarios stock", output)
         self.assertGreaterEqual(output.count("--planning-provider jsonl"), 5)
         self.assertGreaterEqual(output.count("--planning-preview-jsonl"), 5)
+
+    def test_route_ablation_wrapper_plans_new_controller_names(self):
+        sim_root = _sim_root()
+        script = os.path.join(
+            sim_root,
+            "scripts",
+            "suspension",
+            "run_suspension_route_ablation.sh")
+        route = os.path.join(
+            sim_root,
+            "e2e_models",
+            "carla_garage",
+            "leaderboard",
+            "data",
+            "suspension_routes",
+            "planning_aware_v2",
+            "town04_r18_wp50_72_outer_scurve_ar_noscenario.xml")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            result = subprocess.run(
+                [
+                    "bash",
+                    script,
+                    "--route",
+                    route,
+                    "--seed",
+                    "111",
+                    "--controllers",
+                    "identity_jsonl",
+                    "export_only",
+                    "planning_aware_v3_mpc_primary_safe",
+                    "planning_aware_v3_mpc_primary_authority",
+                    "planning_aware_v3_mpc_skyhook_prior",
+                    "constant_damper_1p02",
+                    "constant_damper_1p03",
+                    "--repetitions",
+                    "1",
+                    "--dry-run",
+                    "--no-analyze",
+                    "--output-dir",
+                    temp_dir,
+                ],
+                cwd=sim_root,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=120)
+
+            self.assertEqual(
+                0,
+                result.returncode,
+                msg=result.stdout[-4000:] + result.stderr[-4000:])
+            plan_path = os.path.join(temp_dir, "run_plan.csv")
+            with open(plan_path, newline="") as csv_file:
+                rows = list(csv.DictReader(csv_file))
+
+        by_controller = {row["controller"]: row for row in rows}
+        self.assertEqual(
+            "LEAD_identity_jsonl",
+            by_controller["identity_jsonl"]["scenario_key"])
+        self.assertEqual(
+            "LEAD_export_only",
+            by_controller["export_only"]["scenario_key"])
+        self.assertEqual(
+            "LEAD_planning_aware_v3_mpc_primary_safe",
+            by_controller["planning_aware_v3_mpc_primary_safe"][
+                "scenario_key"])
+        self.assertEqual(
+            "LEAD_planning_aware_v3_mpc_primary_authority",
+            by_controller["planning_aware_v3_mpc_primary_authority"][
+                "scenario_key"])
+        self.assertEqual(
+            "LEAD_planning_aware_v3_mpc_skyhook_prior",
+            by_controller["planning_aware_v3_mpc_skyhook_prior"][
+                "scenario_key"])
+        self.assertEqual(
+            "LEAD_constant_damper_1.02",
+            by_controller["constant_damper_1p02"]["scenario_key"])
+        self.assertEqual(
+            "LEAD_constant_damper_1.03",
+            by_controller["constant_damper_1p03"]["scenario_key"])
 
     def test_parallel_runner_synthesizes_pard_jsonl_sidecar_plan(self):
         sim_root = _sim_root()

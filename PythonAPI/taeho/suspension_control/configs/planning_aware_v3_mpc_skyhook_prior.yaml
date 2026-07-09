@@ -1,0 +1,54 @@
+# Skyhook-prior profile for the future planning_aware_v3_mpc_primary controller.
+
+controller_version: planning_aware_v3_mpc_primary_b2d_threshold_modal_v1
+
+default_dt: 0.05
+model_dt: 0.05
+horizon_s: 1.5
+max_horizon_s: 2.0
+max_planning_age_frames: 5
+min_horizon_dt: 0.02
+max_horizon_dt: 0.20
+wheel_count: 4
+
+min_damper_scale: 0.75
+max_damper_scale: 1.25
+max_rate_up_scale_per_s: 1.2
+max_rate_down_scale_per_s: 1.2
+
+target_speed_ramp_s: 1.0
+brake_decel_scale: 6.0
+throttle_accel_scale: 2.0
+speed_cap_mps: 45.0
+
+min_preview_points_for_trajectory_curvature: 3
+curvature_abs_cap: 0.30
+predicted_accel_abs_cap: 30.0
+yaw_rate_abs_cap: 5.0
+yaw_acc_abs_cap: 20.0
+
+half_wheelbase_m: 1.45
+half_track_m: 0.85
+front_x_sign: 1.0
+left_y_sign: -1.0
+outer_side_sign_from_ay: -1.0
+g: 9.81
+
+use_skyhook_prior: true
+W_prior: 0.05
+
+comfort_history_s: 2.0
+comfort_filter_tau_s: 0.15
+comfort_margin_activation: 0.10
+comfort_slew_penalty_gain: 2.0
+comfort_mean_damper_penalty_gain: 1.0
+
+comfort_lon_acc_upper: 2.40
+comfort_lon_acc_lower: -4.05
+comfort_abs_lat_acc: 4.89
+comfort_abs_lon_jerk: 4.13
+comfort_abs_mag_jerk: 8.37
+comfort_abs_yaw_acc: 1.93
+comfort_abs_yaw_rate: 0.95
+
+debug: false

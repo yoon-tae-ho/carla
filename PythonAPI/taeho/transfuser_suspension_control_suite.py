@@ -32,6 +32,12 @@ Optional scenario:
                        apply PARD v2 centered 0.75-1.25 experimental config
   S28_skyhook_roll_v3:
                        apply canonical skyhook + modal roll-rate damping
+  S29_planning_aware_v3_mpc_primary_safe:
+                       apply planning-aware v3 MPC-primary safe profile
+  S30_planning_aware_v3_mpc_primary_authority:
+                       apply planning-aware v3 MPC-primary authority profile
+  S31_planning_aware_v3_mpc_skyhook_prior:
+                       apply planning-aware v3 MPC with skyhook-prior cost
 """
 
 from __future__ import annotations
@@ -75,6 +81,11 @@ from suspension_control.controllers.planning_aware_risk_damping import (
 from suspension_control.controllers.planning_aware_skyhook_roll import (
     PlanningAwareSkyhookRollConfig,
     PlanningAwareSkyhookRollController,
+)
+from suspension_control.controllers.planning_aware_mpc_primary import (
+    PLANNING_AWARE_V3_REQUIRED_DIAGNOSTIC_FIELDS,
+    PlanningAwareV3MpcPrimaryConfig,
+    PlanningAwareV3MpcPrimaryController,
 )
 from suspension_control.controllers.rl_residual import (
     ResidualRLConfig,
@@ -193,6 +204,24 @@ DEFAULT_PLANNING_AWARE_SKYHOOK_ROLL_CONFIG = os.path.join(
     "suspension_control",
     "configs",
     "planning_aware_skyhook_roll.yaml",
+)
+DEFAULT_PLANNING_AWARE_V3_MPC_PRIMARY_SAFE_CONFIG = os.path.join(
+    SCRIPT_DIR,
+    "suspension_control",
+    "configs",
+    "planning_aware_v3_mpc_primary_safe.yaml",
+)
+DEFAULT_PLANNING_AWARE_V3_MPC_PRIMARY_AUTHORITY_CONFIG = os.path.join(
+    SCRIPT_DIR,
+    "suspension_control",
+    "configs",
+    "planning_aware_v3_mpc_primary_authority.yaml",
+)
+DEFAULT_PLANNING_AWARE_V3_MPC_SKYHOOK_PRIOR_CONFIG = os.path.join(
+    SCRIPT_DIR,
+    "suspension_control",
+    "configs",
+    "planning_aware_v3_mpc_skyhook_prior.yaml",
 )
 DEFAULT_RL_RESIDUAL_CONFIG = os.path.join(
     SCRIPT_DIR, "suspension_control", "configs", "rl_residual.yaml")
@@ -394,12 +423,34 @@ SCENARIOS = OrderedDict((
         "uses_suspension_api": True,
         "needs_suspension_state": True,
     }),
+    ("planning_aware_v3_mpc_primary_safe", {
+        "name": "S29_planning_aware_v3_mpc_primary_safe",
+        "label": "S29 planning-aware v3 MPC-primary safe",
+        "controller": "planning_aware_v3_mpc_primary_safe",
+        "uses_suspension_api": True,
+        "needs_suspension_state": True,
+    }),
+    ("planning_aware_v3_mpc_primary_authority", {
+        "name": "S30_planning_aware_v3_mpc_primary_authority",
+        "label": "S30 planning-aware v3 MPC-primary authority",
+        "controller": "planning_aware_v3_mpc_primary_authority",
+        "uses_suspension_api": True,
+        "needs_suspension_state": True,
+    }),
+    ("planning_aware_v3_mpc_skyhook_prior", {
+        "name": "S31_planning_aware_v3_mpc_skyhook_prior",
+        "label": "S31 planning-aware v3 MPC skyhook-prior",
+        "controller": "planning_aware_v3_mpc_skyhook_prior",
+        "uses_suspension_api": True,
+        "needs_suspension_state": True,
+    }),
 ))
 
 SCENARIO_ALIASES = {
     "pard_v2": "pard_v2_active_ultra_safe",
     "planning_risk_damping": "pard_v2_active_ultra_safe",
     "planning_aware_skyhook_roll": "planning_aware",
+    "planning_aware_v3_mpc_primary": "planning_aware_v3_mpc_primary_safe",
 }
 
 
@@ -701,6 +752,42 @@ SKYHOOK_ROLL_V3_DIAGNOSTIC_FIELDS = (
     )
 )
 
+PLANNING_AWARE_V3_MPC_PRIMARY_EXTRA_DIAGNOSTIC_FIELDS = (
+    "planning_aware_v3_planning_age_frames",
+    "mpc_preview_points",
+    "comfort_guard_slew_penalty_multiplier",
+    "comfort_guard_mean_damper_penalty_multiplier",
+    "mpc_feasible_candidate_count",
+    "mpc_rate_rejection_count",
+    "mpc_final_rate_guard_active",
+    "mpc_final_finite_guard_active",
+    "mpc_ltr_soft_guard_active",
+    "mpc_ltr_hard_guard_active",
+    "mpc_optimizer_failed_reason",
+    "mpc_slew_weight_scheduled",
+    "mpc_mean_damper_weight_scheduled",
+    "mpc_b2d_threshold_cost",
+    "mpc_body_cost",
+    "mpc_ltr_cost",
+    "mpc_command_effort_cost",
+    "mpc_slew_cost",
+    "mpc_mean_damper_cost",
+    "mpc_semi_active_feasibility_cost",
+    "planning_aware_v3_shadow_identity_fallback",
+    "planning_aware_v3_shadow_fallback_reason",
+    "planning_aware_v3_outer_side_sign_from_ay",
+)
+
+PLANNING_AWARE_V3_MPC_PRIMARY_DIAGNOSTIC_FIELDS = tuple(
+    field for field in (
+        PLANNING_AWARE_V3_REQUIRED_DIAGNOSTIC_FIELDS +
+        PLANNING_AWARE_V3_MPC_PRIMARY_EXTRA_DIAGNOSTIC_FIELDS)
+    if field not in {
+        "predicted_ay_source",
+        "predicted_ax_min",
+    }
+)
+
 DIAGNOSTIC_FIELDS = (
     "wall_time",
     "scenario",
@@ -717,6 +804,8 @@ DIAGNOSTIC_FIELDS = (
     "local_ay",
     "yaw_rate",
 ) + SUSPENSION_STATE_DIAGNOSTIC_FIELDS + SKYHOOK_ROLL_V3_DIAGNOSTIC_FIELDS + (
+    PLANNING_AWARE_V3_MPC_PRIMARY_DIAGNOSTIC_FIELDS
+) + (
     "command_applied",
     "apply_count",
     "verify_count",
@@ -1279,6 +1368,14 @@ def build_planning_aware_skyhook_roll_config(
     return PlanningAwareSkyhookRollConfig()
 
 
+def build_planning_aware_v3_mpc_primary_config(
+    path: str,
+) -> PlanningAwareV3MpcPrimaryConfig:
+    if path and os.path.isfile(path):
+        return PlanningAwareV3MpcPrimaryConfig.from_mapping(read_flat_yaml(path))
+    return PlanningAwareV3MpcPrimaryConfig()
+
+
 def build_rl_residual_config(
     args: argparse.Namespace,
     baseline_override: str = "",
@@ -1358,6 +1455,20 @@ def make_controller(controller_name: str, args: argparse.Namespace):
         return PlanningAwareSkyhookRollController(
             build_planning_aware_skyhook_roll_config(
                 args.planning_aware_skyhook_roll_config))
+    if controller_name in (
+            "planning_aware_v3_mpc_primary",
+            "planning_aware_v3_mpc_primary_safe"):
+        return PlanningAwareV3MpcPrimaryController(
+            build_planning_aware_v3_mpc_primary_config(
+                args.planning_aware_v3_mpc_primary_safe_config))
+    if controller_name == "planning_aware_v3_mpc_primary_authority":
+        return PlanningAwareV3MpcPrimaryController(
+            build_planning_aware_v3_mpc_primary_config(
+                args.planning_aware_v3_mpc_primary_authority_config))
+    if controller_name == "planning_aware_v3_mpc_skyhook_prior":
+        return PlanningAwareV3MpcPrimaryController(
+            build_planning_aware_v3_mpc_primary_config(
+                args.planning_aware_v3_mpc_skyhook_prior_config))
     if controller_name == "constant_scale":
         return ConstantScaleController(build_constant_scale_config(
             args.constant_scale_config))
@@ -4810,7 +4921,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "pard_v2_active_ultra_safe,"
         "pard_v2_active_safe_1p06,"
         "pard_v2_active_aggressive_0p75_1p25,"
-        "planning_aware "
+        "planning_aware,"
+        "planning_aware_v3_mpc_primary_safe,"
+        "planning_aware_v3_mpc_primary_authority,"
+        "planning_aware_v3_mpc_skyhook_prior "
         "(default: stock,identity,pid)")
     parser.add_argument(
         "--baseline-scenario",
@@ -4885,6 +4999,18 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--planning-aware-skyhook-roll-config",
         default=DEFAULT_PLANNING_AWARE_SKYHOOK_ROLL_CONFIG,
         help="flat YAML fair planning-aware skyhook-roll config path")
+    parser.add_argument(
+        "--planning-aware-v3-mpc-primary-safe-config",
+        default=DEFAULT_PLANNING_AWARE_V3_MPC_PRIMARY_SAFE_CONFIG,
+        help="flat YAML planning-aware v3 MPC-primary safe config path")
+    parser.add_argument(
+        "--planning-aware-v3-mpc-primary-authority-config",
+        default=DEFAULT_PLANNING_AWARE_V3_MPC_PRIMARY_AUTHORITY_CONFIG,
+        help="flat YAML planning-aware v3 MPC-primary authority config path")
+    parser.add_argument(
+        "--planning-aware-v3-mpc-skyhook-prior-config",
+        default=DEFAULT_PLANNING_AWARE_V3_MPC_SKYHOOK_PRIOR_CONFIG,
+        help="flat YAML planning-aware v3 MPC skyhook-prior config path")
     parser.add_argument(
         "--rl-residual-config",
         default=DEFAULT_RL_RESIDUAL_CONFIG,
