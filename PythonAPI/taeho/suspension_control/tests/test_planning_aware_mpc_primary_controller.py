@@ -13,8 +13,10 @@ from suspension_control.controllers.base import (
 from suspension_control.controllers.planning_aware_mpc_primary import (
     PLANNING_AWARE_V3_MPC_PRIMARY_VERSION,
     PLANNING_AWARE_V3_REQUIRED_DIAGNOSTIC_FIELDS,
+    MpcDamperCandidate,
     PlanningAwareV3MpcPrimaryConfig,
     PlanningAwareV3MpcPrimaryController,
+    build_planning_preview,
 )
 from suspension_control.controllers.skyhook_roll_v3 import (
     SkyhookRollV3CanonicalModalController,
@@ -357,6 +359,85 @@ class PlanningAwareV3MpcPrimaryControllerTest(unittest.TestCase):
         self.assertGreaterEqual(
             output.diagnostics["skyhook_prior_penalty"],
             0.0)
+
+    def test_raw_grid_candidates_are_retained_sorted_and_selected(self):
+        controller = PlanningAwareV3MpcPrimaryController()
+        context = _context(planning=_lateral_planning(ay=5.0))
+        shadow_output = controller.skyhook_roll_v3_shadow.compute(context)
+        shadow_dampers = controller._command_dampers(
+            shadow_output.command,
+            4,
+            default=1.0)
+        preview = build_planning_preview(context, controller.config)
+        comfort = controller.comfort_guard.update(context, controller.config)
+        optimizer = controller._generate_v3_raw_mpc_grid_candidates(
+            context=context,
+            preview=preview,
+            comfort=comfort,
+            shadow_dampers=shadow_dampers,
+            top_k=2)
+
+        self.assertIsNotNone(optimizer.selected)
+        self.assertGreaterEqual(len(optimizer.raw_candidates), 2)
+        self.assertEqual(optimizer.selected, optimizer.raw_candidates[0])
+        self.assertEqual("mpc_grid", optimizer.raw_candidates[0].kind)
+        self.assertEqual(1, int(optimizer.raw_candidates[0].selected))
+        self.assertLessEqual(
+            optimizer.raw_candidates[0].raw_cost,
+            optimizer.raw_candidates[1].raw_cost)
+        self.assertEqual(
+            optimizer.best_cost,
+            optimizer.raw_candidates[0].raw_cost)
+        self.assertEqual(
+            optimizer.second_best_cost,
+            optimizer.raw_candidates[1].raw_cost)
+
+    def test_effective_modal_inference_round_trips_v3_modal_command(self):
+        controller = PlanningAwareV3MpcPrimaryController()
+        context = _context(planning=_lateral_planning(ay=5.0))
+        preview = build_planning_preview(context, controller.config)
+        dampers = controller._modal_to_dampers(
+            preview=preview,
+            u_mean=0.03,
+            u_roll_front=0.04,
+            u_roll_rear=0.02,
+            u_pitch=0.01)
+        modal = controller._effective_modal_from_dampers(dampers, preview)
+
+        self.assertAlmostEqual(0.03, modal[0])
+        self.assertAlmostEqual(0.04, modal[1])
+        self.assertAlmostEqual(0.02, modal[2])
+        self.assertAlmostEqual(0.01, modal[3])
+
+    def test_applied_candidate_helper_matches_v3_selected_command(self):
+        context = _context(planning=_lateral_planning(ay=5.0))
+        probe = PlanningAwareV3MpcPrimaryController()
+        shadow_output = probe.skyhook_roll_v3_shadow.compute(context)
+        shadow_dampers = probe._command_dampers(
+            shadow_output.command,
+            4,
+            default=1.0)
+        preview = build_planning_preview(context, probe.config)
+        comfort = probe.comfort_guard.update(context, probe.config)
+        optimizer = probe._optimize_mpc(
+            context=context,
+            preview=preview,
+            comfort=comfort,
+            shadow_dampers=shadow_dampers)
+        applied = probe._evaluate_candidate_as_applied(
+            optimizer.selected,
+            context,
+            preview,
+            comfort,
+            shadow_dampers)
+        output = PlanningAwareV3MpcPrimaryController().compute(context)
+
+        self.assertIsInstance(applied, MpcDamperCandidate)
+        self.assertEqual(applied.constrained_dampers, applied.raw_dampers)
+        for actual, expected in zip(_dampers(output), applied.final_dampers):
+            self.assertAlmostEqual(actual, expected)
+        self.assertIsNotNone(applied.projected_cost)
+        self.assertTrue(math.isfinite(applied.projected_cost))
 
 
 if __name__ == "__main__":

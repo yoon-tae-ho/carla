@@ -9,7 +9,7 @@ rolling comfort guard.
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field, fields
+from dataclasses import dataclass, field, fields, replace
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from .base import (
@@ -395,15 +395,42 @@ PLANNING_AWARE_V3_REQUIRED_DIAGNOSTIC_FIELDS = (
 
 
 @dataclass(frozen=True)
-class _MpcCandidate:
-    u_mean: float
-    u_roll_front: float
-    u_roll_rear: float
-    u_pitch: float
-    desired_dampers: Tuple[float, ...]
-    cost: float
-    components: Mapping[str, float]
-    ltr_proxy_peak: float
+class MpcDamperCandidate:
+    """Reusable first-step damper candidate for v3-compatible MPC search."""
+
+    kind: str
+    raw_dampers: Tuple[float, ...]
+    u_mean: Optional[float] = None
+    u_roll_front: Optional[float] = None
+    u_roll_rear: Optional[float] = None
+    u_pitch: Optional[float] = None
+    raw_cost: Optional[float] = None
+    projected_cost: Optional[float] = None
+    constrained_dampers: Optional[Tuple[float, ...]] = None
+    projected_dampers: Optional[Tuple[float, ...]] = None
+    final_dampers: Optional[Tuple[float, ...]] = None
+    selected: bool = False
+    rejection_reason: str = ""
+    components: Mapping[str, float] = field(default_factory=dict)
+    projected_components: Mapping[str, float] = field(default_factory=dict)
+    ltr_proxy_peak: float = 0.0
+    projected_ltr_proxy_peak: float = 0.0
+    raw_index: int = 0
+
+    @property
+    def desired_dampers(self) -> Tuple[float, ...]:
+        """Compatibility alias for the original v3 candidate API."""
+
+        return self.raw_dampers
+
+    @property
+    def cost(self) -> float:
+        """Compatibility alias for the original v3 raw candidate cost."""
+
+        return _safe_float(self.raw_cost, 1.0e12)
+
+
+_MpcCandidate = MpcDamperCandidate
 
 
 @dataclass(frozen=True)
@@ -418,6 +445,7 @@ class _MpcOptimizationResult:
     rate_rejection_count: int
     ltr_soft_guard_active: bool
     ltr_hard_guard_active: bool
+    raw_candidates: Tuple[MpcDamperCandidate, ...] = ()
 
 
 class PlanningAwareV3MpcPrimaryController(SuspensionController):
@@ -772,8 +800,22 @@ class PlanningAwareV3MpcPrimaryController(SuspensionController):
         comfort: ComfortGuardResult,
         shadow_dampers: Sequence[float],
     ) -> _MpcOptimizationResult:
+        return self._generate_v3_raw_mpc_grid_candidates(
+            context=context,
+            preview=preview,
+            comfort=comfort,
+            shadow_dampers=shadow_dampers)
+
+    def _generate_v3_raw_mpc_grid_candidates(
+        self,
+        *,
+        context: ControllerContext,
+        preview: PlanningAwareV3Preview,
+        comfort: ComfortGuardResult,
+        shadow_dampers: Sequence[float],
+        top_k: Optional[int] = None,
+    ) -> _MpcOptimizationResult:
         cfg = self.config
-        wheel_count = len(self.previous_final_damper_scales)
         controller_dt = _context_dt(context, cfg.default_dt)
         max_up = max(0.0, _safe_float(cfg.max_rate_up_scale_per_s, 1.2)) * controller_dt
         max_down = max(0.0, _safe_float(cfg.max_rate_down_scale_per_s, 1.2)) * controller_dt
@@ -797,7 +839,8 @@ class PlanningAwareV3MpcPrimaryController(SuspensionController):
                 failed_reason="ltr_hard_threshold",
                 rate_rejection_count=0,
                 ltr_soft_guard_active=ltr_soft,
-                ltr_hard_guard_active=True)
+                ltr_hard_guard_active=True,
+                raw_candidates=())
 
         u_mean_values = self._rate_refined_grid(cfg.u_mean_grid, rate_delta)
         u_front_values = self._rate_refined_grid(
@@ -808,12 +851,11 @@ class PlanningAwareV3MpcPrimaryController(SuspensionController):
             rate_delta)
         u_pitch_values = self._rate_refined_grid(cfg.u_pitch_grid, rate_delta)
 
-        best: Optional[_MpcCandidate] = None
-        second_best_cost: Optional[float] = None
         candidate_count = 0
         feasible_count = 0
         rate_rejections = 0
         previous = tuple(self.previous_final_damper_scales)
+        raw_candidates: List[MpcDamperCandidate] = []
 
         for u_mean in u_mean_values:
             for u_roll_front in u_front_values:
@@ -855,25 +897,23 @@ class PlanningAwareV3MpcPrimaryController(SuspensionController):
                             comfort=comfort,
                             shadow_dampers=shadow_dampers,
                             ltr_soft_active=ltr_soft)
-                        candidate = _MpcCandidate(
+                        candidate = MpcDamperCandidate(
+                            kind="mpc_grid",
+                            raw_dampers=desired,
                             u_mean=u_mean,
                             u_roll_front=u_roll_front,
                             u_roll_rear=u_roll_rear,
                             u_pitch=u_pitch,
-                            desired_dampers=desired,
-                            cost=cost,
+                            raw_cost=cost,
                             components=components,
-                            ltr_proxy_peak=ltr_peak)
-                        if best is None or candidate.cost < best.cost:
-                            if best is not None:
-                                second_best_cost = best.cost
-                            best = candidate
-                        elif (
-                                second_best_cost is None or
-                                candidate.cost < second_best_cost):
-                            second_best_cost = candidate.cost
+                            ltr_proxy_peak=ltr_peak,
+                            raw_index=candidate_count - 1)
+                        raw_candidates.append(candidate)
 
-        if best is None:
+        sorted_candidates = tuple(sorted(
+            raw_candidates,
+            key=self._candidate_sort_key_for_raw_cost))
+        if not sorted_candidates:
             return _MpcOptimizationResult(
                 selected=None,
                 candidate_count=candidate_count,
@@ -884,20 +924,37 @@ class PlanningAwareV3MpcPrimaryController(SuspensionController):
                 failed_reason="all_candidates_infeasible",
                 rate_rejection_count=rate_rejections,
                 ltr_soft_guard_active=ltr_soft,
-                ltr_hard_guard_active=False)
+                ltr_hard_guard_active=False,
+                raw_candidates=())
 
-        second = second_best_cost if second_best_cost is not None else best.cost
+        selected = replace(sorted_candidates[0], selected=True)
+        second = (
+            sorted_candidates[1].cost
+            if len(sorted_candidates) > 1 else selected.cost)
+        retained = (selected,) + sorted_candidates[1:]
+        if top_k is not None:
+            limit = max(2, int(_safe_float(top_k, 2)))
+            retained = retained[:limit]
         return _MpcOptimizationResult(
-            selected=best,
+            selected=selected,
             candidate_count=candidate_count,
             feasible_candidate_count=feasible_count,
-            best_cost=best.cost,
+            best_cost=selected.cost,
             second_best_cost=second,
-            cost_margin=max(0.0, second - best.cost),
+            cost_margin=max(0.0, second - selected.cost),
             failed_reason="",
             rate_rejection_count=rate_rejections,
             ltr_soft_guard_active=ltr_soft,
-            ltr_hard_guard_active=False)
+            ltr_hard_guard_active=False,
+            raw_candidates=retained)
+
+    def _candidate_sort_key_for_raw_cost(
+        self,
+        candidate: MpcDamperCandidate,
+    ) -> Tuple[float, int]:
+        return (
+            _safe_float(candidate.raw_cost, 1.0e12),
+            int(_safe_float(candidate.raw_index, 0)))
 
     def _candidate_cost(
         self,
@@ -1149,6 +1206,170 @@ class PlanningAwareV3MpcPrimaryController(SuspensionController):
                 return False
         return True
 
+    def _candidate_bounds_and_rate_dampers(
+        self,
+        raw: Sequence[float],
+        previous: Sequence[float],
+        context: ControllerContext,
+    ) -> Tuple[Tuple[float, ...], bool]:
+        cfg = self.config
+        raw_values = tuple(raw or ())
+        previous_values = tuple(previous or ())
+        wheel_count = len(raw_values) if raw_values else len(previous_values)
+        if wheel_count <= 0:
+            wheel_count = max(1, int(_safe_float(cfg.wheel_count, 4)))
+        controller_dt = _context_dt(context, cfg.default_dt)
+        max_up = max(
+            0.0,
+            _safe_float(cfg.max_rate_up_scale_per_s, 1.2)) * controller_dt
+        max_down = max(
+            0.0,
+            _safe_float(cfg.max_rate_down_scale_per_s, 1.2)) * controller_dt
+        low = _safe_float(cfg.min_damper_scale, 0.75)
+        high = _safe_float(cfg.max_damper_scale, 1.25)
+        previous_matched = _match_length(previous_values, wheel_count, 1.0)
+        constrained: List[float] = []
+        guard_active = False
+        for index in range(wheel_count):
+            raw_value = raw_values[index] if index < len(raw_values) else 1.0
+            finite = _safe_float(raw_value, 1.0)
+            bounded = clamp(finite, low, high)
+            limited = clamp(
+                bounded,
+                previous_matched[index] - max_down,
+                previous_matched[index] + max_up)
+            raw_finite = _optional_finite_float(raw_value)
+            if raw_finite is None or not math.isclose(
+                    limited,
+                    raw_finite,
+                    rel_tol=1.0e-12,
+                    abs_tol=1.0e-12):
+                guard_active = True
+            constrained.append(limited)
+        return tuple(constrained), guard_active
+
+    def _evaluate_candidate_as_applied(
+        self,
+        candidate: MpcDamperCandidate,
+        context: ControllerContext,
+        preview: PlanningAwareV3Preview,
+        comfort: ComfortGuardResult,
+        shadow_dampers: Sequence[float],
+    ) -> MpcDamperCandidate:
+        wheel_count = len(self.previous_final_damper_scales)
+        raw_dampers = _match_length(candidate.raw_dampers, wheel_count, 1.0)
+        constrained, _ = self._candidate_bounds_and_rate_dampers(
+            raw_dampers,
+            self.previous_final_damper_scales,
+            context)
+        projected, _ = self._semi_active_project_dampers(constrained, context)
+        final, _ = self._final_safety_dampers(projected, context)
+        rejection_reason = candidate.rejection_reason
+        if not _all_finite(final):
+            final = tuple(1.0 for _ in range(wheel_count))
+            projected = final
+            rejection_reason = "final_nonfinite_safety_guard"
+        modal = self._effective_modal_from_dampers(final, preview)
+        open_loop_ltr = self._ltr_proxy_peak(preview=preview, roll_values=None)
+        ltr_soft = open_loop_ltr >= _safe_float(
+            self.config.ltr_soft_threshold,
+            0.45)
+        projected_cost, projected_components, projected_ltr = (
+            self._candidate_cost(
+                context=context,
+                preview=preview,
+                desired=final,
+                u_mean=modal[0],
+                u_roll_front=modal[1],
+                u_roll_rear=modal[2],
+                u_pitch=modal[3],
+                comfort=comfort,
+                shadow_dampers=shadow_dampers,
+                ltr_soft_active=ltr_soft))
+        return replace(
+            candidate,
+            raw_dampers=raw_dampers,
+            constrained_dampers=constrained,
+            projected_dampers=projected,
+            final_dampers=final,
+            projected_cost=projected_cost,
+            projected_components=projected_components,
+            projected_ltr_proxy_peak=projected_ltr,
+            rejection_reason=rejection_reason)
+
+    def _effective_modal_from_dampers(
+        self,
+        dampers: Sequence[float],
+        preview: PlanningAwareV3Preview,
+    ) -> Tuple[float, float, float, float]:
+        values = _match_length(dampers, 4, 1.0)
+        side_signs = self._side_signs(preview)
+        pitch_signs = self._pitch_signs()
+        u_mean = _mean(values) - 1.0
+        front_roll_den = side_signs[0] - side_signs[1]
+        rear_roll_den = side_signs[2] - side_signs[3]
+        front_pitch = 0.5 * (pitch_signs[0] + pitch_signs[1])
+        rear_pitch = 0.5 * (pitch_signs[2] + pitch_signs[3])
+        pitch_den = front_pitch - rear_pitch
+        u_roll_front = (
+            (values[0] - values[1]) / front_roll_den
+            if abs(front_roll_den) > _EPS else 0.0)
+        u_roll_rear = (
+            (values[2] - values[3]) / rear_roll_den
+            if abs(rear_roll_den) > _EPS else 0.0)
+        u_pitch = (
+            (0.5 * (values[0] + values[1]) -
+             0.5 * (values[2] + values[3])) / pitch_den
+            if abs(pitch_den) > _EPS else 0.0)
+        return (
+            _safe_float(u_mean),
+            _safe_float(u_roll_front),
+            _safe_float(u_roll_rear),
+            _safe_float(u_pitch))
+
+    def _candidate_sort_key_for_projected_cost(
+        self,
+        candidate: MpcDamperCandidate,
+    ) -> Tuple[int, int, float, float, int]:
+        projected_cost = _safe_float(
+            candidate.projected_cost,
+            _safe_float(candidate.raw_cost, 1.0e12))
+        cost_bucket = int(round(projected_cost / 1.0e-9))
+        kind_priority = {
+            "previous_hold": 0,
+            "neutral_return": 1,
+        }.get(candidate.kind, 2)
+        final = (
+            candidate.final_dampers or
+            candidate.projected_dampers or
+            candidate.constrained_dampers or
+            candidate.raw_dampers)
+        previous = _match_length(
+            self.previous_final_damper_scales,
+            len(final),
+            1.0)
+        final_to_previous = (
+            self._l2_distance(final, previous)
+            if candidate.kind == "mpc_grid" else 0.0)
+        return (
+            cost_bucket,
+            kind_priority,
+            final_to_previous,
+            _safe_float(candidate.raw_cost, 1.0e12),
+            int(_safe_float(candidate.raw_index, 0)))
+
+    def _l2_distance(
+        self,
+        left: Sequence[float],
+        right: Sequence[float],
+    ) -> float:
+        length = max(len(left), len(right))
+        left_values = _match_length(left, length, 1.0)
+        right_values = _match_length(right, length, 1.0)
+        return math.sqrt(sum(
+            (left_values[index] - right_values[index]) ** 2
+            for index in range(length)))
+
     def _semi_active_project_dampers(
         self,
         desired: Sequence[float],
@@ -1202,33 +1423,10 @@ class PlanningAwareV3MpcPrimaryController(SuspensionController):
         projected: Sequence[float],
         context: ControllerContext,
     ) -> Tuple[Tuple[float, ...], bool]:
-        cfg = self.config
-        controller_dt = _context_dt(context, cfg.default_dt)
-        max_up = max(
-            0.0,
-            _safe_float(cfg.max_rate_up_scale_per_s, 1.2)) * controller_dt
-        max_down = max(
-            0.0,
-            _safe_float(cfg.max_rate_down_scale_per_s, 1.2)) * controller_dt
-        low = _safe_float(cfg.min_damper_scale, 0.75)
-        high = _safe_float(cfg.max_damper_scale, 1.25)
-        final = []
-        guard_active = False
-        for index, value in enumerate(projected):
-            previous = (
-                self.previous_final_damper_scales[index]
-                if index < len(self.previous_final_damper_scales) else 1.0)
-            finite = _safe_float(value, 1.0)
-            bounded = clamp(finite, low, high)
-            limited = clamp(bounded, previous - max_down, previous + max_up)
-            if not math.isclose(
-                    limited,
-                    value,
-                    rel_tol=1.0e-12,
-                    abs_tol=1.0e-12):
-                guard_active = True
-            final.append(limited)
-        return tuple(final), guard_active
+        return self._candidate_bounds_and_rate_dampers(
+            projected,
+            self.previous_final_damper_scales,
+            context)
 
     def _semi_active_feasibility_cost(
         self,

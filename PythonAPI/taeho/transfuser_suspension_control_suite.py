@@ -87,6 +87,11 @@ from suspension_control.controllers.planning_aware_mpc_primary import (
     PlanningAwareV3MpcPrimaryConfig,
     PlanningAwareV3MpcPrimaryController,
 )
+from suspension_control.controllers.planning_aware_mpc_phaseA import (
+    PLANNING_AWARE_V4_PHASEA_DIAGNOSTIC_FIELDS,
+    PlanningAwareV4MpcPhaseAConfig,
+    PlanningAwareV4MpcPhaseAController,
+)
 from suspension_control.controllers.rl_residual import (
     ResidualRLConfig,
     ResidualRLController,
@@ -222,6 +227,12 @@ DEFAULT_PLANNING_AWARE_V3_MPC_SKYHOOK_PRIOR_CONFIG = os.path.join(
     "suspension_control",
     "configs",
     "planning_aware_v3_mpc_skyhook_prior.yaml",
+)
+DEFAULT_PLANNING_AWARE_V4_MPC_PHASEA_AUTHORITY_CONFIG = os.path.join(
+    SCRIPT_DIR,
+    "suspension_control",
+    "configs",
+    "planning_aware_v4_mpc_phaseA_authority.yaml",
 )
 DEFAULT_RL_RESIDUAL_CONFIG = os.path.join(
     SCRIPT_DIR, "suspension_control", "configs", "rl_residual.yaml")
@@ -441,6 +452,13 @@ SCENARIOS = OrderedDict((
         "name": "S31_planning_aware_v3_mpc_skyhook_prior",
         "label": "S31 planning-aware v3 MPC skyhook-prior",
         "controller": "planning_aware_v3_mpc_skyhook_prior",
+        "uses_suspension_api": True,
+        "needs_suspension_state": True,
+    }),
+    ("planning_aware_v4_mpc_phaseA_authority", {
+        "name": "S32_planning_aware_v4_mpc_phaseA_authority",
+        "label": "S32 planning-aware v4 MPC Phase A authority",
+        "controller": "planning_aware_v4_mpc_phaseA_authority",
         "uses_suspension_api": True,
         "needs_suspension_state": True,
     }),
@@ -804,7 +822,8 @@ DIAGNOSTIC_FIELDS = (
     "local_ay",
     "yaw_rate",
 ) + SUSPENSION_STATE_DIAGNOSTIC_FIELDS + SKYHOOK_ROLL_V3_DIAGNOSTIC_FIELDS + (
-    PLANNING_AWARE_V3_MPC_PRIMARY_DIAGNOSTIC_FIELDS
+    PLANNING_AWARE_V3_MPC_PRIMARY_DIAGNOSTIC_FIELDS +
+    PLANNING_AWARE_V4_PHASEA_DIAGNOSTIC_FIELDS
 ) + (
     "command_applied",
     "apply_count",
@@ -1376,6 +1395,14 @@ def build_planning_aware_v3_mpc_primary_config(
     return PlanningAwareV3MpcPrimaryConfig()
 
 
+def build_planning_aware_v4_mpc_phaseA_config(
+    path: str,
+) -> PlanningAwareV4MpcPhaseAConfig:
+    if path and os.path.isfile(path):
+        return PlanningAwareV4MpcPhaseAConfig.from_mapping(read_flat_yaml(path))
+    return PlanningAwareV4MpcPhaseAConfig()
+
+
 def build_rl_residual_config(
     args: argparse.Namespace,
     baseline_override: str = "",
@@ -1469,6 +1496,10 @@ def make_controller(controller_name: str, args: argparse.Namespace):
         return PlanningAwareV3MpcPrimaryController(
             build_planning_aware_v3_mpc_primary_config(
                 args.planning_aware_v3_mpc_skyhook_prior_config))
+    if controller_name == "planning_aware_v4_mpc_phaseA_authority":
+        return PlanningAwareV4MpcPhaseAController(
+            build_planning_aware_v4_mpc_phaseA_config(
+                args.planning_aware_v4_mpc_phaseA_authority_config))
     if controller_name == "constant_scale":
         return ConstantScaleController(build_constant_scale_config(
             args.constant_scale_config))
@@ -4924,7 +4955,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "planning_aware,"
         "planning_aware_v3_mpc_primary_safe,"
         "planning_aware_v3_mpc_primary_authority,"
-        "planning_aware_v3_mpc_skyhook_prior "
+        "planning_aware_v3_mpc_skyhook_prior,"
+        "planning_aware_v4_mpc_phaseA_authority "
         "(default: stock,identity,pid)")
     parser.add_argument(
         "--baseline-scenario",
@@ -5011,6 +5043,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--planning-aware-v3-mpc-skyhook-prior-config",
         default=DEFAULT_PLANNING_AWARE_V3_MPC_SKYHOOK_PRIOR_CONFIG,
         help="flat YAML planning-aware v3 MPC skyhook-prior config path")
+    parser.add_argument(
+        "--planning-aware-v4-mpc-phaseA-authority-config",
+        "--planning-aware-v4-mpc-phasea-authority-config",
+        dest="planning_aware_v4_mpc_phaseA_authority_config",
+        default=DEFAULT_PLANNING_AWARE_V4_MPC_PHASEA_AUTHORITY_CONFIG,
+        help="flat YAML planning-aware v4 MPC Phase A authority config path")
     parser.add_argument(
         "--rl-residual-config",
         default=DEFAULT_RL_RESIDUAL_CONFIG,
