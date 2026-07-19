@@ -11,6 +11,7 @@ and exports the environment variables consumed by ``run_lead_debug_route.sh``.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
 import time
@@ -21,6 +22,9 @@ if SCRIPT_DIR not in sys.path:
     sys.path.insert(0, SCRIPT_DIR)
 
 import transfuser_suspension_control_suite as suite
+from suspension_control.controllers.planning_aware_residual_qp_mpc import (
+    run_residual_qp_solver_preflight,
+)
 
 
 def _detect_sim_root() -> str:
@@ -39,7 +43,8 @@ DEFAULT_LEAD_ROUTES = os.path.join(
     "leaderboard",
     "data",
     "suspension_routes",
-    "suspension_town04_fig8_route18_noscenario.xml",
+    "planning_aware_v2",
+    "town04_r18_wp50_72_outer_scurve_ar_noscenario.xml",
 )
 DEFAULT_LEAD_SUITE_ROOT = os.path.join(
     E2E_ROOT, "outputs", "lead", "suspension_suite")
@@ -205,6 +210,18 @@ def preflight_sidecar_carla_import() -> None:
         getattr(carla, "__file__", "<unknown>"))
 
 
+def preflight_residual_qp_solver() -> None:
+    result = run_residual_qp_solver_preflight()
+    print(
+        "[lead_suspension_control_suite] residual QP solver preflight: %s" %
+        json.dumps(result.to_dict(), sort_keys=True))
+    if not result.ok:
+        raise RuntimeError(
+            "LEAD residual QP solver preflight failed: status=%s error=%s" % (
+                result.status,
+                result.error))
+
+
 def build_arg_parser() -> argparse.ArgumentParser:
     configure_suite_defaults()
     parser = suite.build_arg_parser()
@@ -213,6 +230,14 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--preflight-only",
         action="store_true",
         help="run LEAD sidecar CARLA import preflight and exit")
+    parser.add_argument(
+        "--residual-solver-preflight-only",
+        action="store_true",
+        help="run residual QP-MPC solver import/tiny-QP preflight and exit")
+    parser.add_argument(
+        "--require-residual-solver-preflight",
+        action="store_true",
+        help="run residual QP-MPC solver preflight before route execution")
     parser.add_argument(
         "--lead-checkpoint",
         default=DEFAULT_LEAD_CHECKPOINT,
@@ -263,16 +288,22 @@ def build_arg_parser() -> argparse.ArgumentParser:
                 "planning_aware_v3_mpc_primary_safe,"
                 "planning_aware_v3_mpc_primary_authority,"
                 "planning_aware_v3_mpc_skyhook_prior,"
-                "planning_aware_v4_mpc_phaseA_authority "
+                "planning_aware_v4_mpc_phaseA_authority,"
+                "planning_aware_v5_residual_id_probe "
                 "(default: stock,identity,skyhook)")
     return parser
 
 
 def main(args: argparse.Namespace) -> None:
     configure_suite_defaults()
+    if getattr(args, "residual_solver_preflight_only", False):
+        preflight_residual_qp_solver()
+        return
     preflight_sidecar_carla_import()
     if getattr(args, "preflight_only", False):
         return
+    if getattr(args, "require_residual_solver_preflight", False):
+        preflight_residual_qp_solver()
     suite.main(args)
 
 

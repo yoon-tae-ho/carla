@@ -190,6 +190,19 @@ def _raw_optimizer(controller, context):
         top_k=controller._projection_top_k())
 
 
+def _controller_state(controller):
+    guard = controller.comfort_guard
+    return (
+        tuple(controller.previous_final_damper_scales),
+        tuple(guard.samples),
+        guard.filtered_local_ax,
+        guard.filtered_local_ay,
+        guard.filtered_yaw_rate,
+        guard.last_time,
+        tuple(controller.skyhook_roll_v3_shadow.previous_damper_scales),
+    )
+
+
 class PlanningAwareV4MpcPhaseAControllerTest(unittest.TestCase):
 
     def test_direct_constructibility_and_authority_version(self):
@@ -335,6 +348,31 @@ class PlanningAwareV4MpcPhaseAControllerTest(unittest.TestCase):
             self.assertTrue(math.isfinite(output.diagnostics[key]), key)
             self.assertGreaterEqual(output.diagnostics[key], 0.0)
         self.assertEqual(0.0, output.diagnostics["debug_compute_sleep_ms"])
+
+    def test_compute_shadow_matches_production_without_mutating_state(self):
+        controller = PlanningAwareV4MpcPhaseAController()
+        warmup_context = _context(
+            state=_state(elapsed_seconds=4.0, local_ax=0.2, local_ay=0.3),
+            planning=_planning())
+        controller.compute(warmup_context)
+        context = _context(
+            state=_state(
+                elapsed_seconds=4.05,
+                roll_rate=8.0,
+                local_ay=5.0),
+            planning=_lateral_planning(ay=5.0))
+        before = _controller_state(controller)
+
+        shadow = controller.compute_shadow(context)
+
+        self.assertEqual(before, _controller_state(controller))
+
+        production = controller.compute(context)
+        self.assertTrue(shadow.command.is_close(production.command))
+        self.assertEqual(
+            shadow.diagnostics["v4_selected_candidate_kind"],
+            production.diagnostics["v4_selected_candidate_kind"])
+        self.assertNotEqual(before, _controller_state(controller))
 
 
 if __name__ == "__main__":

@@ -12,6 +12,10 @@ from .controllers.base import (
 )
 from .controllers.identity import IdentityController
 from .controllers.pid import FeedbackPIDConfig, FeedbackPIDController
+from .controllers.planning_aware_residual_id_probe import (
+    PlanningAwareV5ResidualIdProbeConfig,
+    PlanningAwareV5ResidualIdProbeController,
+)
 from .controllers.rl_residual import ResidualRLConfig, ResidualRLController
 from .controllers.skyhook import SkyhookConfig, SkyhookController
 from .controllers.skyhook_roll import SkyhookRollConfig, SkyhookRollController
@@ -26,6 +30,8 @@ __all__ = [
     "IdentityController",
     "PlanningInfo",
     "PlanningPoint",
+    "PlanningAwareV5ResidualIdProbeConfig",
+    "PlanningAwareV5ResidualIdProbeController",
     "PlanningPreviewSuspensionController",
     "ResidualRLConfig",
     "ResidualRLController",

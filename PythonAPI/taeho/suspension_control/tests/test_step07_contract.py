@@ -26,6 +26,9 @@ from suspension_control.controllers.estimators import (
 from suspension_control.controllers.planning_aware_risk_damping import (
     PlanningAwareRiskDampingController,
 )
+from suspension_control.controllers.planning_aware_residual_id_probe import (
+    PlanningAwareV5ResidualIdProbeController,
+)
 from suspension_control.controllers.planning_aware_skyhook_roll import (
     PlanningAwareSkyhookRollController,
 )
@@ -257,7 +260,7 @@ class Step07SuiteSelectionTest(unittest.TestCase):
             "constant_damper_1p02,pard_v2_shadow,"
             "pard_v2_active_ultra_safe,pard_v2_active_safe_1p06,"
             "pard_v2_active_aggressive_0p75_1p25,planning_aware,"
-            "skyhook_roll_v3")
+            "skyhook_roll_v3,planning_aware_v5_residual_id_probe")
 
         self.assertEqual(
             [
@@ -275,6 +278,7 @@ class Step07SuiteSelectionTest(unittest.TestCase):
                 "S26_pard_v2_active_aggressive_0p75_1p25",
                 "S27_planning_aware",
                 "S28_skyhook_roll_v3",
+                "S33_planning_aware_v5_residual_id_probe",
             ],
             [scenario["name"] for scenario in scenarios])
 
@@ -313,6 +317,24 @@ class Step07SuiteSelectionTest(unittest.TestCase):
             "needs_suspension_state": True,
         }
         self.assertEqual([expected], by_key)
+        self.assertEqual([expected], by_code)
+
+    def test_residual_id_probe_is_selectable_by_key_alias_and_code(self):
+        import transfuser_suspension_control_suite as suite
+
+        by_key = suite.selected_scenarios("planning_aware_v5_residual_id_probe")
+        by_alias = suite.selected_scenarios("residual_id_probe")
+        by_code = suite.selected_scenarios("S33")
+
+        expected = {
+            "name": "S33_planning_aware_v5_residual_id_probe",
+            "label": "S33 planning-aware v5 residual ID probe",
+            "controller": "planning_aware_v5_residual_id_probe",
+            "uses_suspension_api": True,
+            "needs_suspension_state": True,
+        }
+        self.assertEqual([expected], by_key)
+        self.assertEqual([expected], by_alias)
         self.assertEqual([expected], by_code)
 
     def test_pard_scenario_aliases_select_ultra_safe(self):
@@ -356,6 +378,9 @@ class Step07SuiteSelectionTest(unittest.TestCase):
             args)
         pard_alias = suite.make_controller("pard_v2", args)
         planning_aware = suite.make_controller("planning_aware", args)
+        residual_id_probe = suite.make_controller(
+            "planning_aware_v5_residual_id_probe",
+            args)
 
         self.assertIsInstance(constant, ConstantScaleController)
         self.assertIsInstance(constant_1p02, ConstantScaleController)
@@ -375,6 +400,9 @@ class Step07SuiteSelectionTest(unittest.TestCase):
         self.assertIsInstance(pard_aggressive, PlanningAwareRiskDampingController)
         self.assertIsInstance(pard_alias, PlanningAwareRiskDampingController)
         self.assertIsInstance(planning_aware, PlanningAwareSkyhookRollController)
+        self.assertIsInstance(
+            residual_id_probe,
+            PlanningAwareV5ResidualIdProbeController)
         self.assertEqual(1.02, constant_1p02.config.damper_scale)
         self.assertTrue(pard_shadow.config.shadow_mode)
         self.assertEqual(1.035, pard_ultra.config.damper_max)
@@ -501,6 +529,7 @@ class Step07SuiteSelectionTest(unittest.TestCase):
                 "planning_aware_v3_mpc_primary_authority",
                 compact_help)
             self.assertIn("planning_aware_v3_mpc_skyhook_prior", compact_help)
+            self.assertIn("planning_aware_v5_residual_id_probe", compact_help)
         self.assertIn("--skyhook-roll-config", tfpp_help)
         self.assertIn("--skyhook-roll-v3-config", tfpp_help)
         self.assertIn("--skyhook-roll-yaw-config", tfpp_help)
@@ -519,6 +548,9 @@ class Step07SuiteSelectionTest(unittest.TestCase):
             tfpp_help)
         self.assertIn(
             "--planning-aware-v3-mpc-skyhook-prior-config",
+            tfpp_help)
+        self.assertIn(
+            "--planning-aware-v5-residual-id-probe-config",
             tfpp_help)
 
     def test_new_diagnostics_are_registered(self):
@@ -703,6 +735,21 @@ class Step07SuiteSelectionTest(unittest.TestCase):
                 "state_steer",
                 "state_brake",
                 "exception_type"):
+            self.assertIn(field_name, suite.DIAGNOSTIC_FIELDS)
+
+        for field_name in (
+                "residual_mpc_schema_version",
+                "residual_mpc_controller_version",
+                "residual_mpc_phase_a_shadow_damper_fl",
+                "residual_mpc_requested_residual_fl",
+                "residual_mpc_bounded_residual_fl",
+                "residual_mpc_rate_limited_residual_fl",
+                "residual_mpc_projected_residual_fl",
+                "residual_mpc_final_residual_fl",
+                "residual_mpc_final_damper_fl",
+                "residual_mpc_preview_target_speed_semantics",
+                "residual_mpc_roll_deg_raw",
+                "residual_mpc_roll_deg_filt"):
             self.assertIn(field_name, suite.DIAGNOSTIC_FIELDS)
 
     def test_skyhook_v3_canonical_csv_contract_fields_registered(self):
@@ -968,6 +1015,7 @@ class Step07RunnerMappingTest(unittest.TestCase):
             "LEAD_constant_damper_1.02",
             "LEAD_skyhook_roll",
             "LEAD_planning_aware",
+            "LEAD_planning_aware_v5_residual_id_probe",
             "LEAD_pard_v2_shadow",
             "LEAD_pard_v2_active_ultra_safe",
             "LEAD_pard_v2_active_safe_1p06",
@@ -1013,6 +1061,9 @@ class Step07RunnerMappingTest(unittest.TestCase):
             "scenario=LEAD_planning_aware kind=sidecar",
             output)
         self.assertIn(
+            "scenario=LEAD_planning_aware_v5_residual_id_probe kind=sidecar",
+            output)
+        self.assertIn(
             "scenario=LEAD_pard_v2_shadow kind=sidecar",
             output)
         self.assertIn(
@@ -1027,6 +1078,7 @@ class Step07RunnerMappingTest(unittest.TestCase):
         self.assertIn("--scenarios constant_damper_1p02", output)
         self.assertIn("--scenarios skyhook_roll", output)
         self.assertIn("--scenarios planning_aware", output)
+        self.assertIn("--scenarios planning_aware_v5_residual_id_probe", output)
         self.assertIn("--scenarios pard_v2_shadow", output)
         self.assertIn("--scenarios pard_v2_active_ultra_safe", output)
         self.assertIn("--scenarios pard_v2_active_safe_1p06", output)
@@ -1034,8 +1086,8 @@ class Step07RunnerMappingTest(unittest.TestCase):
             "--scenarios pard_v2_active_aggressive_0p75_1p25",
             output)
         self.assertIn("--scenarios stock", output)
-        self.assertGreaterEqual(output.count("--planning-provider jsonl"), 5)
-        self.assertGreaterEqual(output.count("--planning-preview-jsonl"), 5)
+        self.assertGreaterEqual(output.count("--planning-provider jsonl"), 6)
+        self.assertGreaterEqual(output.count("--planning-preview-jsonl"), 6)
 
     def test_route_ablation_wrapper_plans_new_controller_names(self):
         sim_root = _sim_root()
@@ -1069,6 +1121,7 @@ class Step07RunnerMappingTest(unittest.TestCase):
                     "planning_aware_v3_mpc_primary_safe",
                     "planning_aware_v3_mpc_primary_authority",
                     "planning_aware_v3_mpc_skyhook_prior",
+                    "planning_aware_v5_residual_id_probe",
                     "constant_damper_1p02",
                     "constant_damper_1p03",
                     "--repetitions",
@@ -1110,6 +1163,10 @@ class Step07RunnerMappingTest(unittest.TestCase):
         self.assertEqual(
             "LEAD_planning_aware_v3_mpc_skyhook_prior",
             by_controller["planning_aware_v3_mpc_skyhook_prior"][
+                "scenario_key"])
+        self.assertEqual(
+            "LEAD_planning_aware_v5_residual_id_probe",
+            by_controller["planning_aware_v5_residual_id_probe"][
                 "scenario_key"])
         self.assertEqual(
             "LEAD_constant_damper_1.02",
@@ -1228,6 +1285,18 @@ class Step07SummaryPardGateTest(unittest.TestCase):
         self.assertIn("LEAD_planning_aware", tool.JSONL_SCENARIOS)
         self.assertIn("LEAD_planning_aware", tool.JSONL_SIDECAR_SCENARIOS)
         self.assertNotIn("LEAD_planning_aware", tool.PARD_V2_SCENARIOS)
+        self.assertIn(
+            "LEAD_planning_aware_v5_residual_id_probe",
+            tool.SIDECAR_SCENARIOS)
+        self.assertIn(
+            "LEAD_planning_aware_v5_residual_id_probe",
+            tool.JSONL_SCENARIOS)
+        self.assertIn(
+            "LEAD_planning_aware_v5_residual_id_probe",
+            tool.JSONL_SIDECAR_SCENARIOS)
+        self.assertNotIn(
+            "LEAD_planning_aware_v5_residual_id_probe",
+            tool.SMOKE_SCENARIOS)
 
         self.assertIn(
             "LEAD_constant_damper_1.02",
@@ -1256,6 +1325,7 @@ class Step07SummaryPardGateTest(unittest.TestCase):
                 "mode": "smoke",
                 "seeds": "101",
                 "scenarios": "LEAD_planning_aware,LEAD_pard_v2_shadow,"
+                             "LEAD_planning_aware_v5_residual_id_probe,"
                              "LEAD_constant_damper_1.02",
             })()
             plan = tool.expected_plan(args, temp_dir)
@@ -1271,6 +1341,13 @@ class Step07SummaryPardGateTest(unittest.TestCase):
             by_scenario["LEAD_pard_v2_shadow"]["run_kind"])
         self.assertTrue(by_scenario["LEAD_pard_v2_shadow"][
             "planning_jsonl_host"].endswith("planning_preview.jsonl"))
+        self.assertEqual(
+            "sidecar",
+            by_scenario["LEAD_planning_aware_v5_residual_id_probe"][
+                "run_kind"])
+        self.assertTrue(
+            by_scenario["LEAD_planning_aware_v5_residual_id_probe"][
+                "planning_jsonl_host"].endswith("planning_preview.jsonl"))
         self.assertEqual(
             "sidecar",
             by_scenario["LEAD_constant_damper_1.02"]["run_kind"])

@@ -38,6 +38,12 @@ Optional scenario:
                        apply planning-aware v3 MPC-primary authority profile
   S31_planning_aware_v3_mpc_skyhook_prior:
                        apply planning-aware v3 MPC with skyhook-prior cost
+  S33_planning_aware_v5_residual_id_probe:
+                       apply Phase-A-based residual ID probe excitation
+  S34_planning_aware_v5_residual_qp_mpc:
+                       apply manifest-gated residual QP-MPC over Phase A
+  S35_planning_aware_v5_residual_qp_mpc_shadow:
+                       compute residual QP-MPC diagnostics; apply Phase A
 """
 
 from __future__ import annotations
@@ -92,6 +98,18 @@ from suspension_control.controllers.planning_aware_mpc_phaseA import (
     PlanningAwareV4MpcPhaseAConfig,
     PlanningAwareV4MpcPhaseAController,
 )
+from suspension_control.controllers.planning_aware_residual_id_probe import (
+    RESIDUAL_ID_PROBE_DIAGNOSTIC_FIELDS,
+    PlanningAwareV5ResidualIdProbeConfig,
+    PlanningAwareV5ResidualIdProbeController,
+)
+from suspension_control.controllers.planning_aware_residual_qp_mpc import (
+    RESIDUAL_QP_MPC_DIAGNOSTIC_FIELDS,
+    PlanningAwareV5ResidualQpMpcConfig,
+    PlanningAwareV5ResidualQpMpcController,
+    PlanningAwareV5ResidualQpMpcShadowController,
+    ResidualMpcArtifact,
+)
 from suspension_control.controllers.rl_residual import (
     ResidualRLConfig,
     ResidualRLController,
@@ -112,7 +130,9 @@ from suspension_control.controllers.target_speed_schedule import (
 from suspension_control.metrics.comfort import comfort_metrics
 from suspension_control.metrics.stability import stability_metrics
 from suspension_control.runtime.carla_adapter import (
+    ScaleReadbackMismatch,
     apply_suspension_command,
+    compare_suspension_scales,
     import_carla,
     native_damper_rate_by_wheel,
     native_spring_strength_by_wheel,
@@ -145,7 +165,8 @@ DEFAULT_ROUTES = os.path.join(
     "leaderboard",
     "data",
     "suspension_routes",
-    "suspension_town04_fig8_route18_noscenario.xml",
+    "planning_aware_v2",
+    "town04_r18_wp50_72_outer_scurve_ar_noscenario.xml",
 )
 DEFAULT_TFPP_OUTPUT_ROOT = os.path.join(
     SIM_ROOT, "e2e_models", "outputs", "transfuserpp")
@@ -233,6 +254,24 @@ DEFAULT_PLANNING_AWARE_V4_MPC_PHASEA_AUTHORITY_CONFIG = os.path.join(
     "suspension_control",
     "configs",
     "planning_aware_v4_mpc_phaseA_authority.yaml",
+)
+DEFAULT_PLANNING_AWARE_V5_RESIDUAL_ID_PROBE_CONFIG = os.path.join(
+    SCRIPT_DIR,
+    "suspension_control",
+    "configs",
+    "planning_aware_v5_residual_id_probe_conservative.yaml",
+)
+DEFAULT_PLANNING_AWARE_V5_RESIDUAL_QP_MPC_CONFIG = os.path.join(
+    SCRIPT_DIR,
+    "suspension_control",
+    "configs",
+    "planning_aware_v5_residual_qp_mpc.yaml",
+)
+DEFAULT_PLANNING_AWARE_V5_RESIDUAL_QP_MPC_SHADOW_CONFIG = os.path.join(
+    SCRIPT_DIR,
+    "suspension_control",
+    "configs",
+    "planning_aware_v5_residual_qp_mpc_shadow.yaml",
 )
 DEFAULT_RL_RESIDUAL_CONFIG = os.path.join(
     SCRIPT_DIR, "suspension_control", "configs", "rl_residual.yaml")
@@ -462,6 +501,27 @@ SCENARIOS = OrderedDict((
         "uses_suspension_api": True,
         "needs_suspension_state": True,
     }),
+    ("planning_aware_v5_residual_id_probe", {
+        "name": "S33_planning_aware_v5_residual_id_probe",
+        "label": "S33 planning-aware v5 residual ID probe",
+        "controller": "planning_aware_v5_residual_id_probe",
+        "uses_suspension_api": True,
+        "needs_suspension_state": True,
+    }),
+    ("planning_aware_v5_residual_qp_mpc", {
+        "name": "S34_planning_aware_v5_residual_qp_mpc",
+        "label": "S34 planning-aware v5 residual QP-MPC",
+        "controller": "planning_aware_v5_residual_qp_mpc",
+        "uses_suspension_api": True,
+        "needs_suspension_state": True,
+    }),
+    ("planning_aware_v5_residual_qp_mpc_shadow", {
+        "name": "S35_planning_aware_v5_residual_qp_mpc_shadow",
+        "label": "S35 planning-aware v5 residual QP-MPC shadow",
+        "controller": "planning_aware_v5_residual_qp_mpc_shadow",
+        "uses_suspension_api": True,
+        "needs_suspension_state": True,
+    }),
 ))
 
 SCENARIO_ALIASES = {
@@ -469,6 +529,9 @@ SCENARIO_ALIASES = {
     "planning_risk_damping": "pard_v2_active_ultra_safe",
     "planning_aware_skyhook_roll": "planning_aware",
     "planning_aware_v3_mpc_primary": "planning_aware_v3_mpc_primary_safe",
+    "residual_id_probe": "planning_aware_v5_residual_id_probe",
+    "residual_qp_mpc": "planning_aware_v5_residual_qp_mpc",
+    "residual_qp_mpc_shadow": "planning_aware_v5_residual_qp_mpc_shadow",
 }
 
 
@@ -527,9 +590,53 @@ EVENT_FIELDS = (
     "type_id",
     "role_name",
     "message",
+    "event_type",
+    "severity",
+    "elapsed_seconds",
+    "step",
+    "apply_count",
+    "verify_count",
+    "command_sequence_id",
+    "verify_command_sequence_id",
+    "verify_apply_frame",
+    "verify_deferred_frame",
+    "readback_timing",
+    "residual_mpc_suppression_reason",
+    "residual_mpc_excitation_active",
+    "actor_removed",
+    "dt_gap",
+    "residual_mpc_phase_a_shadow_damper_json",
+    "residual_mpc_requested_residual_modal_json",
+    "residual_mpc_requested_residual_wheel_json",
+    "residual_mpc_bounded_residual_json",
+    "residual_mpc_rate_limited_residual_json",
+    "residual_mpc_projected_residual_json",
+    "residual_mpc_final_residual_json",
+    "residual_mpc_final_damper_json",
+    "previous_damper_scale_json",
+    "expected_damper_scale_json",
+    "readback_damper_scale_json",
+    "readback_damper_delta_json",
+    "immediate_readback_damper_scale_json",
+    "immediate_readback_damper_delta_json",
+    "readback_tolerance",
+    "diagnostic_row_emission_skipped",
+    "diagnostic_row_emission_skipped_reason",
+    "hard_error_type",
+    "readback_mismatch_max_abs",
+    "readback_mismatch_wheel",
+    "first_mismatch_abs",
+    "first_mismatch_wheel",
+    "vector_mismatch_max_abs",
+    "vector_mismatch_max_wheel",
+    "immediate_first_mismatch_abs",
+    "immediate_first_mismatch_wheel",
+    "immediate_vector_mismatch_max_abs",
+    "immediate_vector_mismatch_max_wheel",
 )
 
 WHEEL_DIAGNOSTIC_LABELS = ("fl", "fr", "rl", "rr")
+MODAL_DIAGNOSTIC_LABELS = ("mean", "roll_front", "roll_rear", "pitch")
 
 PARD_V2_DIAGNOSTIC_FIELDS = (
     "controller_name",
@@ -798,7 +905,7 @@ PLANNING_AWARE_V3_MPC_PRIMARY_EXTRA_DIAGNOSTIC_FIELDS = (
 
 PLANNING_AWARE_V3_MPC_PRIMARY_DIAGNOSTIC_FIELDS = tuple(
     field for field in (
-        PLANNING_AWARE_V3_REQUIRED_DIAGNOSTIC_FIELDS +
+    PLANNING_AWARE_V3_REQUIRED_DIAGNOSTIC_FIELDS +
         PLANNING_AWARE_V3_MPC_PRIMARY_EXTRA_DIAGNOSTIC_FIELDS)
     if field not in {
         "predicted_ay_source",
@@ -823,8 +930,29 @@ DIAGNOSTIC_FIELDS = (
     "yaw_rate",
 ) + SUSPENSION_STATE_DIAGNOSTIC_FIELDS + SKYHOOK_ROLL_V3_DIAGNOSTIC_FIELDS + (
     PLANNING_AWARE_V3_MPC_PRIMARY_DIAGNOSTIC_FIELDS +
-    PLANNING_AWARE_V4_PHASEA_DIAGNOSTIC_FIELDS
+    PLANNING_AWARE_V4_PHASEA_DIAGNOSTIC_FIELDS +
+    RESIDUAL_ID_PROBE_DIAGNOSTIC_FIELDS +
+    RESIDUAL_QP_MPC_DIAGNOSTIC_FIELDS
 ) + (
+    "diagnostic_status",
+    "verify_status",
+    "verify_failure_type",
+    "readback_mismatch_max_abs",
+    "readback_mismatch_wheel",
+    "first_mismatch_abs",
+    "first_mismatch_wheel",
+    "vector_mismatch_max_abs",
+    "vector_mismatch_max_wheel",
+    "command_sequence_id",
+    "verify_command_sequence_id",
+    "verify_apply_frame",
+    "verify_deferred_frame",
+    "verify_readback_timing",
+    "immediate_readback_status",
+    "immediate_first_mismatch_abs",
+    "immediate_first_mismatch_wheel",
+    "immediate_vector_mismatch_max_abs",
+    "immediate_vector_mismatch_max_wheel",
     "command_applied",
     "apply_count",
     "verify_count",
@@ -1403,6 +1531,101 @@ def build_planning_aware_v4_mpc_phaseA_config(
     return PlanningAwareV4MpcPhaseAConfig()
 
 
+def build_planning_aware_v5_residual_id_probe_config(
+    path: str,
+) -> PlanningAwareV5ResidualIdProbeConfig:
+    if path and os.path.isfile(path):
+        return PlanningAwareV5ResidualIdProbeConfig.from_mapping(
+            read_flat_yaml(path))
+    return PlanningAwareV5ResidualIdProbeConfig()
+
+
+def build_planning_aware_v5_residual_qp_mpc_config(
+    path: str,
+    *,
+    strict_step07_shadow_validation: bool = False,
+) -> PlanningAwareV5ResidualQpMpcConfig:
+    values: Dict[str, Any] = {}
+    if path and os.path.isfile(path):
+        values.update(read_flat_yaml(path))
+    values["config_path"] = path or ""
+    values["strict_step07_shadow_validation"] = bool(
+        strict_step07_shadow_validation)
+    return PlanningAwareV5ResidualQpMpcConfig.from_mapping(values)
+
+
+def require_step07_residual_shadow_strict_startup_preflight(
+    args: argparse.Namespace,
+    scenarios: Sequence[Mapping[str, Any]],
+) -> None:
+    if not bool(getattr(args, "strict_step07_residual_shadow_validation", False)):
+        return
+    if not any(
+            scenario.get("controller") ==
+            "planning_aware_v5_residual_qp_mpc_shadow"
+            for scenario in scenarios):
+        return
+
+    config_path = expand_path(
+        getattr(args, "planning_aware_v5_residual_qp_mpc_shadow_config", ""))
+    config = build_planning_aware_v5_residual_qp_mpc_config(
+        config_path,
+        strict_step07_shadow_validation=True)
+    model_artifact_dir = str(config.model_artifact_dir or "")
+    required_files = ("manifest.json", "preprocessing.json", "model.npz")
+    failures: List[str] = []
+    artifact_loaded = False
+
+    if not config_path or not os.path.isfile(config_path):
+        failures.append("config file does not exist: %s" % (config_path or "<empty>"))
+    if not model_artifact_dir:
+        failures.append("model_artifact_dir is empty")
+    elif not os.path.isdir(model_artifact_dir):
+        failures.append("model_artifact_dir does not exist: %s" % model_artifact_dir)
+    else:
+        for required_file in required_files:
+            required_path = os.path.join(model_artifact_dir, required_file)
+            if not os.path.isfile(required_path):
+                failures.append("required model file missing: %s" % required_path)
+        if not failures:
+            try:
+                ResidualMpcArtifact.load(
+                    model_artifact_dir,
+                    require_validated_live=bool(config.require_validated_live),
+                    allow_dry_model=bool(config.allow_dry_model))
+                artifact_loaded = True
+            except Exception as exc:  # noqa: BLE001 - strict startup diagnostic.
+                failures.append(
+                    "model artifact load failed: %s:%s" % (
+                        exc.__class__.__name__,
+                        exc))
+
+    if failures:
+        print("Step07 residual QP-MPC shadow strict startup validation: FAIL")
+        for failure in failures:
+            print("  - %s" % failure)
+        print("  config path: %s" % (config_path or "<empty>"))
+        print("  config exists: %s" % int(bool(config_path) and os.path.isfile(config_path)))
+        print("  model_artifact_dir: %s" % (model_artifact_dir or "<empty>"))
+        print("  model_artifact_dir_exists: %s" % int(os.path.isdir(model_artifact_dir)))
+        print("  model_artifact_loaded: %s" % int(artifact_loaded))
+        print("  solver backend: %s" % config.solver_name)
+        print("  strict validation flag: 1")
+        raise RuntimeError(
+            "Step07 residual QP-MPC shadow strict startup validation failed")
+
+    print("")
+    print("=== Step07 residual QP-MPC shadow strict startup validation ===")
+    print("  status: PASS")
+    print("  config path: %s" % config_path)
+    print("  config exists: 1")
+    print("  model_artifact_dir: %s" % model_artifact_dir)
+    print("  model_artifact_dir_exists: 1")
+    print("  model_artifact_loaded: 1")
+    print("  solver backend: %s" % config.solver_name)
+    print("  strict validation flag: 1")
+
+
 def build_rl_residual_config(
     args: argparse.Namespace,
     baseline_override: str = "",
@@ -1500,6 +1723,20 @@ def make_controller(controller_name: str, args: argparse.Namespace):
         return PlanningAwareV4MpcPhaseAController(
             build_planning_aware_v4_mpc_phaseA_config(
                 args.planning_aware_v4_mpc_phaseA_authority_config))
+    if controller_name == "planning_aware_v5_residual_id_probe":
+        return PlanningAwareV5ResidualIdProbeController(
+            build_planning_aware_v5_residual_id_probe_config(
+                args.planning_aware_v5_residual_id_probe_config))
+    if controller_name == "planning_aware_v5_residual_qp_mpc":
+        return PlanningAwareV5ResidualQpMpcController(
+            build_planning_aware_v5_residual_qp_mpc_config(
+                args.planning_aware_v5_residual_qp_mpc_config))
+    if controller_name == "planning_aware_v5_residual_qp_mpc_shadow":
+        return PlanningAwareV5ResidualQpMpcShadowController(
+            build_planning_aware_v5_residual_qp_mpc_config(
+                args.planning_aware_v5_residual_qp_mpc_shadow_config,
+                strict_step07_shadow_validation=bool(
+                    args.strict_step07_residual_shadow_validation)))
     if controller_name == "constant_scale":
         return ConstantScaleController(build_constant_scale_config(
             args.constant_scale_config))
@@ -1660,6 +1897,133 @@ def sequence_item(values: Any, index: int, default: Any = "") -> Any:
         return default
 
 
+def json_array(values: Any) -> str:
+    try:
+        sequence = list(values)
+    except TypeError:
+        return ""
+    encoded = []
+    for value in sequence:
+        if value in ("", None):
+            encoded.append(None)
+            continue
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            encoded.append(str(value))
+            continue
+        encoded.append(number if math.isfinite(number) else None)
+    return json.dumps(encoded, separators=(",", ":"))
+
+
+def diagnostic_values_json(
+    diagnostics: Mapping[str, Any],
+    prefix: str,
+    labels: Sequence[str],
+) -> str:
+    values: List[Any] = []
+    found = False
+    for label in labels:
+        key = "%s_%s" % (prefix, label)
+        value = diagnostics.get(key, "")
+        if value not in ("", None):
+            found = True
+        values.append(value)
+    return json_array(values) if found else ""
+
+
+def truthy_status(value: Any) -> bool:
+    return str(value or "").strip().lower() in ("1", "1.0", "true", "yes")
+
+
+def residual_tick_suppressed(diagnostics: Mapping[str, Any]) -> bool:
+    reason = str(diagnostics.get("residual_mpc_suppression_reason", "")).strip()
+    if reason and reason.lower() != "none":
+        return True
+    active = diagnostics.get("residual_mpc_excitation_active", "")
+    return active not in ("", None) and not truthy_status(active)
+
+
+def residual_dt_gap(diagnostics: Mapping[str, Any]) -> bool:
+    reason = str(diagnostics.get("residual_mpc_suppression_reason", "")).strip()
+    return reason.lower() == "dt_gap" or truthy_status(
+        diagnostics.get("dt_gap_warning", ""))
+
+
+def command_damper_scales_json(command: SuspensionCommand) -> str:
+    return json_array(damper_scales_from_command(command))
+
+
+def mismatch_payload_value(
+    payload: Mapping[str, Any],
+    key: str,
+    default: Any = "",
+) -> Any:
+    value = payload.get(key, default)
+    return default if value is None else value
+
+
+def readback_mismatch_wheel_value(payload: Mapping[str, Any]) -> Any:
+    return mismatch_payload_value(
+        payload,
+        "mismatch_wheel_label",
+        mismatch_payload_value(payload, "mismatch_wheel_index", ""))
+
+
+def comparison_mismatch_fields(
+    payload: Mapping[str, Any],
+    prefix: str = "",
+) -> Dict[str, Any]:
+    return {
+        "%sfirst_mismatch_abs" % prefix: mismatch_payload_value(
+            payload,
+            "first_mismatch_abs",
+            mismatch_payload_value(payload, "mismatch_max_abs", "")),
+        "%sfirst_mismatch_wheel" % prefix: mismatch_payload_value(
+            payload,
+            "first_mismatch_wheel_label",
+            readback_mismatch_wheel_value(payload)),
+        "%svector_mismatch_max_abs" % prefix: mismatch_payload_value(
+            payload,
+            "vector_mismatch_max_abs",
+            ""),
+        "%svector_mismatch_max_wheel" % prefix: mismatch_payload_value(
+            payload,
+            "vector_mismatch_wheel_label",
+            mismatch_payload_value(payload, "vector_mismatch_wheel_index", "")),
+    }
+
+
+def scale_mismatch_message(payload: Mapping[str, Any]) -> str:
+    field = str(mismatch_payload_value(payload, "mismatch_field", "scale") or "scale")
+    index = int(mismatch_payload_value(payload, "mismatch_wheel_index", -1) or -1)
+    if field == "spring":
+        expected = mismatch_payload_value(payload, "expected_spring_scales", ())
+        readback = mismatch_payload_value(payload, "readback_spring_scales", ())
+    else:
+        expected = mismatch_payload_value(payload, "expected_damper_scales", ())
+        readback = mismatch_payload_value(payload, "readback_damper_scales", ())
+    try:
+        expected_value = expected[index]
+        readback_value = readback[index]
+    except (IndexError, TypeError):
+        expected_value = ""
+        readback_value = ""
+    try:
+        expected_text = "%0.9g" % float(expected_value)
+    except (TypeError, ValueError):
+        expected_text = str(expected_value)
+    try:
+        readback_text = "%0.9g" % float(readback_value)
+    except (TypeError, ValueError):
+        readback_text = str(readback_value)
+    return "wheel %d %s scale mismatch: expected %s got %s" % (
+        index,
+        field,
+        expected_text,
+        readback_text)
+
+
 def write_json(path: str, data: Any) -> None:
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w") as json_file:
@@ -1690,6 +2054,30 @@ def write_csv_rows(
         writer.writeheader()
         for row in rows:
             writer.writerow({field: format_value(row.get(field, "")) for field in fields})
+
+
+def write_controller_debug_qp_snapshots(
+    controller: Any,
+    path: str,
+    *,
+    append: bool,
+) -> int:
+    """Drain optional controller snapshots after compute timing has ended."""
+
+    drain = getattr(controller, "drain_debug_qp_snapshots", None)
+    if not callable(drain):
+        return 0
+    rows = tuple(drain() or ())
+    if not rows:
+        return 0
+    directory = os.path.dirname(path)
+    if directory:
+        os.makedirs(directory, exist_ok=True)
+    with open(path, "a" if append else "w", encoding="utf-8") as output_file:
+        for row in rows:
+            output_file.write(json.dumps(dict(row), sort_keys=True))
+            output_file.write("\n")
+    return len(rows)
 
 
 def get_actor_control(actor: Any):
@@ -1757,6 +2145,131 @@ def task_info_from_planning(planning: Any) -> Dict[str, Any]:
     return {}
 
 
+def verify_failure_type_from_payload(payload: Mapping[str, Any]) -> str:
+    hard_type = str(payload.get("hard_error_type", "") or "").strip()
+    if hard_type:
+        return hard_type
+    field = str(payload.get("mismatch_field", "") or "scale").strip()
+    return "%s_readback_mismatch" % field
+
+
+def readback_summary_from_mismatch(
+    payload: Mapping[str, Any],
+) -> Mapping[str, Any]:
+    summary = payload.get("readback_summary", {})
+    return summary if isinstance(summary, Mapping) else {}
+
+
+def verify_failure_event_extra(
+    *,
+    state: Any,
+    actor_id: int,
+    episode_index: Any,
+    apply_count: int,
+    verify_count: int,
+    output_diagnostics: Mapping[str, Any],
+    command: SuspensionCommand,
+    error: ScaleReadbackMismatch,
+    command_sequence_id: Any = "",
+    verify_apply_frame: Any = "",
+    verify_deferred_frame: Any = "",
+    readback_timing: str = "immediate_after_apply",
+    previous_damper_scales: Sequence[float] = (),
+    immediate_comparison: Optional[Mapping[str, Any]] = None,
+) -> Dict[str, Any]:
+    payload = error.payload
+    immediate_payload = (
+        immediate_comparison
+        if isinstance(immediate_comparison, Mapping) else {})
+    row = {
+        "event_type": "verify_failure",
+        "severity": "hard_error",
+        "actor_id": actor_id,
+        "episode_index": episode_index,
+        "elapsed_seconds": getattr(state, "elapsed_seconds", ""),
+        "step": getattr(state, "step", ""),
+        "apply_count": apply_count,
+        "verify_count": verify_count,
+        "command_sequence_id": command_sequence_id,
+        "verify_command_sequence_id": command_sequence_id,
+        "verify_apply_frame": verify_apply_frame,
+        "verify_deferred_frame": verify_deferred_frame,
+        "readback_timing": readback_timing,
+        "residual_mpc_suppression_reason": output_diagnostics.get(
+            "residual_mpc_suppression_reason", ""),
+        "residual_mpc_excitation_active": output_diagnostics.get(
+            "residual_mpc_excitation_active", ""),
+        "actor_removed": 0,
+        "dt_gap": int(residual_dt_gap(output_diagnostics)),
+        "residual_mpc_phase_a_shadow_damper_json": diagnostic_values_json(
+            output_diagnostics,
+            "residual_mpc_phase_a_shadow_damper",
+            WHEEL_DIAGNOSTIC_LABELS),
+        "residual_mpc_requested_residual_modal_json": diagnostic_values_json(
+            output_diagnostics,
+            "residual_mpc_modal",
+            MODAL_DIAGNOSTIC_LABELS),
+        "residual_mpc_requested_residual_wheel_json": diagnostic_values_json(
+            output_diagnostics,
+            "residual_mpc_requested_residual",
+            WHEEL_DIAGNOSTIC_LABELS),
+        "residual_mpc_bounded_residual_json": diagnostic_values_json(
+            output_diagnostics,
+            "residual_mpc_bounded_residual",
+            WHEEL_DIAGNOSTIC_LABELS),
+        "residual_mpc_rate_limited_residual_json": diagnostic_values_json(
+            output_diagnostics,
+            "residual_mpc_rate_limited_residual",
+            WHEEL_DIAGNOSTIC_LABELS),
+        "residual_mpc_projected_residual_json": diagnostic_values_json(
+            output_diagnostics,
+            "residual_mpc_projected_residual",
+            WHEEL_DIAGNOSTIC_LABELS),
+        "residual_mpc_final_residual_json": diagnostic_values_json(
+            output_diagnostics,
+            "residual_mpc_final_residual",
+            WHEEL_DIAGNOSTIC_LABELS),
+        "residual_mpc_final_damper_json": (
+            diagnostic_values_json(
+                output_diagnostics,
+                "residual_mpc_final_damper",
+                WHEEL_DIAGNOSTIC_LABELS)
+            or command_damper_scales_json(command)),
+        "previous_damper_scale_json": json_array(previous_damper_scales),
+        "expected_damper_scale_json": json_array(
+            mismatch_payload_value(
+                payload,
+                "expected_damper_scales",
+                damper_scales_from_command(command))),
+        "readback_damper_scale_json": json_array(
+            mismatch_payload_value(payload, "readback_damper_scales", ())),
+        "readback_damper_delta_json": json_array(
+            mismatch_payload_value(payload, "damper_deltas", ())),
+        "immediate_readback_damper_scale_json": json_array(
+            mismatch_payload_value(
+                immediate_payload,
+                "readback_damper_scales",
+                ())),
+        "immediate_readback_damper_delta_json": json_array(
+            mismatch_payload_value(immediate_payload, "damper_deltas", ())),
+        "readback_tolerance": mismatch_payload_value(
+            payload,
+            "readback_tolerance",
+            ""),
+        "diagnostic_row_emission_skipped": 0,
+        "diagnostic_row_emission_skipped_reason": "",
+        "hard_error_type": verify_failure_type_from_payload(payload),
+        "readback_mismatch_max_abs": mismatch_payload_value(
+            payload,
+            "mismatch_max_abs",
+            ""),
+        "readback_mismatch_wheel": readback_mismatch_wheel_value(payload),
+    }
+    row.update(comparison_mismatch_fields(payload))
+    row.update(comparison_mismatch_fields(immediate_payload, prefix="immediate_"))
+    return row
+
+
 class SuspensionExperimentSidecar(threading.Thread):
     """CARLA client sidecar used by one scenario run."""
 
@@ -1777,6 +2290,10 @@ class SuspensionExperimentSidecar(threading.Thread):
         self.profile_path = profile_path
         self.diagnostics_path = diagnostics_path
         self.events_path = events_path
+        self.debug_qp_snapshots_path = os.path.join(
+            os.path.dirname(diagnostics_path),
+            "residual_qp_debug_snapshots.jsonl")
+        self.debug_qp_snapshots_started = False
         self.stop_event = threading.Event()
         self.error: Optional[BaseException] = None
 
@@ -1787,6 +2304,8 @@ class SuspensionExperimentSidecar(threading.Thread):
         self.step_by_actor_id: Dict[int, int] = {}
         self.apply_count_by_actor_id: Dict[int, int] = {}
         self.verify_count_by_actor_id: Dict[int, int] = {}
+        self.command_sequence_by_actor_id: Dict[int, int] = {}
+        self.pending_verify_by_actor_id: Dict[int, Dict[str, Any]] = {}
         self.last_frame_by_actor_id: Dict[int, int] = {}
         self.previous_action_by_actor_id: Dict[int, Tuple[float, ...]] = {}
         self.previous_final_damper_by_actor_id: Dict[int, Tuple[float, ...]] = {}
@@ -1856,6 +2375,7 @@ class SuspensionExperimentSidecar(threading.Thread):
         actor: Any = None,
         message: str = "",
         episode_index: Any = "",
+        extra: Optional[Mapping[str, Any]] = None,
     ) -> None:
         row = self.base_row(actor)
         row.update({
@@ -1864,6 +2384,8 @@ class SuspensionExperimentSidecar(threading.Thread):
             "episode_index": episode_index,
             "message": message,
         })
+        if extra:
+            row.update(dict(extra))
         writer.writerow({field: row.get(field, "") for field in EVENT_FIELDS})
 
     def connect_world(self, event_writer: csv.DictWriter):
@@ -1930,6 +2452,8 @@ class SuspensionExperimentSidecar(threading.Thread):
             self.step_by_actor_id.pop(actor_id, None)
             self.apply_count_by_actor_id.pop(actor_id, None)
             self.verify_count_by_actor_id.pop(actor_id, None)
+            self.command_sequence_by_actor_id.pop(actor_id, None)
+            self.pending_verify_by_actor_id.pop(actor_id, None)
             self.last_frame_by_actor_id.pop(actor_id, None)
             self.previous_action_by_actor_id.pop(actor_id, None)
             self.previous_final_damper_by_actor_id.pop(actor_id, None)
@@ -1939,7 +2463,16 @@ class SuspensionExperimentSidecar(threading.Thread):
                 "actor_removed",
                 frame=frame,
                 message="actor %s disappeared" % actor_id,
-                episode_index=episode_index)
+                episode_index=episode_index,
+                extra={
+                    "event_type": "actor_removed",
+                    "severity": "warning",
+                    "actor_id": actor_id,
+                    "actor_removed": 1,
+                    "diagnostic_row_emission_skipped": 1,
+                    "diagnostic_row_emission_skipped_reason": "actor_removed",
+                    "hard_error_type": "actor_removed",
+                })
 
     def capture_if_needed(
         self,
@@ -1956,6 +2489,8 @@ class SuspensionExperimentSidecar(threading.Thread):
         self.step_by_actor_id[actor.id] = 0
         self.apply_count_by_actor_id[actor.id] = 0
         self.verify_count_by_actor_id[actor.id] = 0
+        self.command_sequence_by_actor_id[actor.id] = 0
+        self.pending_verify_by_actor_id.pop(actor.id, None)
 
         if self.scenario["uses_suspension_api"]:
             native = actor.get_suspension_physics_control()
@@ -2006,6 +2541,252 @@ class SuspensionExperimentSidecar(threading.Thread):
             self.args.readback_every > 0 and
             next_apply_count % self.args.readback_every == 0)
 
+    def next_command_sequence_id(self, actor_id: int) -> int:
+        sequence_id = self.command_sequence_by_actor_id.get(actor_id, 0) + 1
+        self.command_sequence_by_actor_id[actor_id] = sequence_id
+        return sequence_id
+
+    def readback_event_extra(
+        self,
+        *,
+        state: Any,
+        actor_id: int,
+        apply_count: int,
+        verify_count: int,
+        command_sequence_id: Any,
+        verify_apply_frame: Any,
+        verify_deferred_frame: Any,
+        readback_timing: str,
+        output_diagnostics: Mapping[str, Any],
+        command: SuspensionCommand,
+        comparison: Mapping[str, Any],
+        previous_damper_scales: Sequence[float] = (),
+        event_type: str = "command_verified",
+        severity: str = "info",
+    ) -> Dict[str, Any]:
+        row = {
+            "event_type": event_type,
+            "severity": severity,
+            "actor_id": actor_id,
+            "episode_index": self.episode_by_actor_id.get(actor_id, ""),
+            "elapsed_seconds": getattr(state, "elapsed_seconds", ""),
+            "step": getattr(state, "step", ""),
+            "apply_count": apply_count,
+            "verify_count": verify_count,
+            "command_sequence_id": command_sequence_id,
+            "verify_command_sequence_id": command_sequence_id,
+            "verify_apply_frame": verify_apply_frame,
+            "verify_deferred_frame": verify_deferred_frame,
+            "readback_timing": readback_timing,
+            "residual_mpc_suppression_reason": output_diagnostics.get(
+                "residual_mpc_suppression_reason", ""),
+            "residual_mpc_excitation_active": output_diagnostics.get(
+                "residual_mpc_excitation_active", ""),
+            "actor_removed": 0,
+            "dt_gap": int(residual_dt_gap(output_diagnostics)),
+            "residual_mpc_phase_a_shadow_damper_json": diagnostic_values_json(
+                output_diagnostics,
+                "residual_mpc_phase_a_shadow_damper",
+                WHEEL_DIAGNOSTIC_LABELS),
+            "residual_mpc_requested_residual_modal_json": diagnostic_values_json(
+                output_diagnostics,
+                "residual_mpc_modal",
+                MODAL_DIAGNOSTIC_LABELS),
+            "residual_mpc_requested_residual_wheel_json": diagnostic_values_json(
+                output_diagnostics,
+                "residual_mpc_requested_residual",
+                WHEEL_DIAGNOSTIC_LABELS),
+            "residual_mpc_bounded_residual_json": diagnostic_values_json(
+                output_diagnostics,
+                "residual_mpc_bounded_residual",
+                WHEEL_DIAGNOSTIC_LABELS),
+            "residual_mpc_rate_limited_residual_json": diagnostic_values_json(
+                output_diagnostics,
+                "residual_mpc_rate_limited_residual",
+                WHEEL_DIAGNOSTIC_LABELS),
+            "residual_mpc_projected_residual_json": diagnostic_values_json(
+                output_diagnostics,
+                "residual_mpc_projected_residual",
+                WHEEL_DIAGNOSTIC_LABELS),
+            "residual_mpc_final_residual_json": diagnostic_values_json(
+                output_diagnostics,
+                "residual_mpc_final_residual",
+                WHEEL_DIAGNOSTIC_LABELS),
+            "residual_mpc_final_damper_json": (
+                diagnostic_values_json(
+                    output_diagnostics,
+                    "residual_mpc_final_damper",
+                    WHEEL_DIAGNOSTIC_LABELS)
+                or command_damper_scales_json(command)),
+            "previous_damper_scale_json": json_array(previous_damper_scales),
+            "expected_damper_scale_json": json_array(
+                mismatch_payload_value(
+                    comparison,
+                    "expected_damper_scales",
+                    damper_scales_from_command(command))),
+            "readback_damper_scale_json": json_array(
+                mismatch_payload_value(comparison, "readback_damper_scales", ())),
+            "readback_damper_delta_json": json_array(
+                mismatch_payload_value(comparison, "damper_deltas", ())),
+            "readback_tolerance": mismatch_payload_value(
+                comparison,
+                "readback_tolerance",
+                ""),
+        }
+        row.update(comparison_mismatch_fields(comparison))
+        return row
+
+    def complete_pending_verification(
+        self,
+        event_writer: csv.DictWriter,
+        actor: Any,
+        state: Any,
+        actual_control: Any,
+    ) -> Dict[str, Any]:
+        actor_id = actor.id
+        pending = self.pending_verify_by_actor_id.get(actor_id)
+        if not pending:
+            return {}
+        if int(getattr(state, "frame", -1)) == int(pending.get("apply_frame", -1)):
+            return {}
+
+        self.pending_verify_by_actor_id.pop(actor_id, None)
+        comparison = compare_suspension_scales(
+            pending["command"],
+            self.native_by_actor_id[actor_id],
+            actual_control,
+            tolerance=self.args.readback_tolerance)
+        self.verify_count_by_actor_id[actor_id] = (
+            self.verify_count_by_actor_id.get(actor_id, 0) + 1)
+        verify_count = self.verify_count_by_actor_id[actor_id]
+        common = {
+            "state": state,
+            "actor_id": actor_id,
+            "apply_count": pending.get("apply_count", ""),
+            "verify_count": verify_count,
+            "command_sequence_id": pending.get("command_sequence_id", ""),
+            "verify_apply_frame": pending.get("apply_frame", ""),
+            "verify_deferred_frame": getattr(state, "frame", ""),
+            "readback_timing": "deferred_next_frame",
+            "output_diagnostics": pending.get("output_diagnostics", {}),
+            "command": pending["command"],
+            "previous_damper_scales": pending.get("previous_damper_scales", ()),
+        }
+        if comparison["matched"]:
+            self.log_event(
+                event_writer,
+                "command_verified",
+                frame=state.frame,
+                actor=actor,
+                episode_index=self.episode_by_actor_id[actor_id],
+                message="deferred readback matched command",
+                extra=self.readback_event_extra(
+                    comparison=comparison,
+                    event_type="command_verified",
+                    severity="info",
+                    **common))
+            return {
+                "status": "pass",
+                "pending": pending,
+                "comparison": comparison,
+                "readback_summary": comparison.get("readback_summary", {}),
+                "verify_count": verify_count,
+            }
+
+        error = ScaleReadbackMismatch(scale_mismatch_message(comparison), comparison)
+        self.log_event(
+            event_writer,
+            "runtime_error",
+            frame=state.frame,
+            actor=actor,
+            episode_index=self.episode_by_actor_id[actor_id],
+            message=str(error),
+            extra=verify_failure_event_extra(
+                state=state,
+                actor_id=actor_id,
+                episode_index=self.episode_by_actor_id[actor_id],
+                apply_count=pending.get("apply_count", ""),
+                verify_count=verify_count,
+                output_diagnostics=pending.get("output_diagnostics", {}),
+                command=pending["command"],
+                error=error,
+                command_sequence_id=pending.get("command_sequence_id", ""),
+                verify_apply_frame=pending.get("apply_frame", ""),
+                verify_deferred_frame=getattr(state, "frame", ""),
+                readback_timing="deferred_next_frame",
+                previous_damper_scales=pending.get("previous_damper_scales", ()),
+                immediate_comparison=pending.get("immediate_comparison", {})))
+        return {
+            "status": "hard_error",
+            "pending": pending,
+            "comparison": comparison,
+            "readback_summary": comparison.get("readback_summary", {}),
+            "verify_count": verify_count,
+            "error": error,
+        }
+
+    def schedule_deferred_verification(
+        self,
+        event_writer: csv.DictWriter,
+        actor: Any,
+        state: Any,
+        command: SuspensionCommand,
+        output_diagnostics: Mapping[str, Any],
+        apply_count: int,
+        command_sequence_id: int,
+        previous_damper_scales: Sequence[float],
+    ) -> Dict[str, Any]:
+        actor_id = actor.id
+        immediate_control = actor.get_suspension_physics_control()
+        comparison = compare_suspension_scales(
+            command,
+            self.native_by_actor_id[actor_id],
+            immediate_control,
+            tolerance=self.args.readback_tolerance)
+        pending = {
+            "command": command,
+            "output_diagnostics": dict(output_diagnostics),
+            "apply_count": apply_count,
+            "command_sequence_id": command_sequence_id,
+            "apply_frame": getattr(state, "frame", ""),
+            "previous_damper_scales": tuple(previous_damper_scales or ()),
+            "immediate_comparison": comparison,
+        }
+        self.pending_verify_by_actor_id[actor_id] = pending
+        self.log_event(
+            event_writer,
+            "command_verify_pending",
+            frame=state.frame,
+            actor=actor,
+            episode_index=self.episode_by_actor_id[actor_id],
+            message=(
+                "immediate readback matched; deferred verification pending"
+                if comparison["matched"]
+                else "immediate readback recorded; deferred verification pending"),
+            extra=self.readback_event_extra(
+                state=state,
+                actor_id=actor_id,
+                apply_count=apply_count,
+                verify_count=self.verify_count_by_actor_id.get(actor_id, 0),
+                command_sequence_id=command_sequence_id,
+                verify_apply_frame=getattr(state, "frame", ""),
+                verify_deferred_frame="",
+                readback_timing="immediate_after_apply",
+                output_diagnostics=output_diagnostics,
+                command=command,
+                comparison=comparison,
+                previous_damper_scales=previous_damper_scales,
+                event_type="verify_pending",
+                severity="info"))
+        return {
+            "status": (
+                "matched_deferred_pending"
+                if comparison["matched"] else "mismatch_deferred_pending"),
+            "pending": pending,
+            "comparison": comparison,
+            "readback_summary": comparison.get("readback_summary", {}),
+        }
+
     def process_controller(
         self,
         diagnostic_writer: csv.DictWriter,
@@ -2018,6 +2799,11 @@ class SuspensionExperimentSidecar(threading.Thread):
         controller = self.controller_by_actor_id[actor_id]
         previous_state = self.previous_state_by_actor_id.get(actor_id)
         current_suspension = actor.get_suspension_physics_control()
+        deferred_verification = self.complete_pending_verification(
+            event_writer,
+            actor,
+            state,
+            current_suspension)
         suspension_state = None
         suspension_state_valid = False
         suspension_state_invalid_reason = ""
@@ -2048,6 +2834,22 @@ class SuspensionExperimentSidecar(threading.Thread):
             step=state.step,
             dt=dt)
         output = controller.compute(context)
+        if callable(getattr(controller, "drain_debug_qp_snapshots", None)):
+            debug_qp_snapshots_path = getattr(
+                self,
+                "debug_qp_snapshots_path",
+                os.path.join(
+                    os.path.dirname(getattr(self, "diagnostics_path", "")),
+                    "residual_qp_debug_snapshots.jsonl"))
+            debug_snapshot_rows = write_controller_debug_qp_snapshots(
+                controller,
+                debug_qp_snapshots_path,
+                append=bool(getattr(
+                    self,
+                    "debug_qp_snapshots_started",
+                    False)))
+            if debug_snapshot_rows > 0:
+                self.debug_qp_snapshots_started = True
         output.command.validate(expected_wheels=len(native.wheels))
         output_diagnostics = dict(output.diagnostics or {})
         route_progress = self.route_progress_tracker.update(
@@ -2090,28 +2892,35 @@ class SuspensionExperimentSidecar(threading.Thread):
 
         next_apply_count = self.apply_count_by_actor_id[actor_id] + 1
         verify = self.should_verify(actor_id, next_apply_count)
+        command_sequence_id = self.next_command_sequence_id(actor_id)
+        apply_result: Mapping[str, Any] = {}
+        readback_summary: Mapping[str, Any] = (
+            deferred_verification.get("readback_summary", {})
+            if isinstance(deferred_verification, Mapping) else {})
+        scheduled_verification: Mapping[str, Any] = {}
+        verify_failure = (
+            deferred_verification.get("error")
+            if isinstance(deferred_verification, Mapping) else None)
         apply_result = apply_suspension_command(
             actor,
             native,
             output.command,
-            verify_readback=verify,
+            verify_readback=False,
             readback_tolerance=self.args.readback_tolerance)
         self.apply_count_by_actor_id[actor_id] = next_apply_count
-
-        readback_summary: Mapping[str, Any] = {}
         if verify:
-            self.verify_count_by_actor_id[actor_id] += 1
-            self.log_event(
+            scheduled_verification = self.schedule_deferred_verification(
                 event_writer,
-                "command_verified",
-                frame=state.frame,
-                actor=actor,
-                episode_index=self.episode_by_actor_id[actor_id],
-                message="readback matched command")
-            readback_summary = read_suspension_scale_summary(
-                native,
-                actor.get_suspension_physics_control())
-        elif self.should_readback(actor_id, next_apply_count):
+                actor,
+                state,
+                output.command,
+                output_diagnostics,
+                next_apply_count,
+                command_sequence_id,
+                previous_final_dampers)
+            if not readback_summary:
+                readback_summary = scheduled_verification.get("readback_summary", {})
+        elif self.should_readback(actor_id, next_apply_count) and not readback_summary:
             readback_summary = read_suspension_scale_summary(
                 native,
                 actor.get_suspension_physics_control())
@@ -2121,6 +2930,59 @@ class SuspensionExperimentSidecar(threading.Thread):
         scales = output.command.as_scale_lists()
         spring_scales = scales["spring_scales"]
         damper_scales = scales["damper_scales"]
+        diagnostic_status = (
+            "verify_failure"
+            if verify_failure is not None
+            else ("suppressed" if residual_tick_suppressed(output_diagnostics)
+                  else "success"))
+        verify_status = "hard_error" if verify_failure is not None else "pass"
+        verify_failure_type = (
+            verify_failure_type_from_payload(verify_failure.payload)
+            if verify_failure is not None else "")
+        verify_failure_payload = (
+            verify_failure.payload if verify_failure is not None else {})
+        readback_mismatch_max_abs = (
+            mismatch_payload_value(
+                verify_failure_payload,
+                "mismatch_max_abs",
+                "")
+            if verify_failure is not None else "")
+        readback_mismatch_wheel = (
+            readback_mismatch_wheel_value(verify_failure_payload)
+            if verify_failure is not None else "")
+        first_mismatch_values = (
+            comparison_mismatch_fields(verify_failure_payload)
+            if verify_failure is not None else {})
+        immediate_comparison = (
+            scheduled_verification.get("comparison", {})
+            if isinstance(scheduled_verification, Mapping) else {})
+        immediate_mismatch_values = (
+            comparison_mismatch_fields(immediate_comparison, prefix="immediate_")
+            if immediate_comparison else {})
+        deferred_pending = (
+            deferred_verification.get("pending", {})
+            if isinstance(deferred_verification, Mapping) else {})
+        scheduled_pending = (
+            scheduled_verification.get("pending", {})
+            if isinstance(scheduled_verification, Mapping) else {})
+        verify_command_sequence_id = (
+            deferred_pending.get("command_sequence_id", "")
+            if deferred_pending else scheduled_pending.get("command_sequence_id", ""))
+        verify_apply_frame = (
+            deferred_pending.get("apply_frame", "")
+            if deferred_pending else scheduled_pending.get("apply_frame", ""))
+        verify_deferred_frame = (
+            state.frame if deferred_pending else "")
+        verify_readback_timing = (
+            "deferred_next_frame"
+            if deferred_pending else (
+                "immediate_after_apply"
+                if scheduled_pending else (
+                    "periodic_immediate"
+                    if readback_summary else "")))
+        immediate_readback_status = (
+            scheduled_verification.get("status", "")
+            if isinstance(scheduled_verification, Mapping) else "")
 
         row: Dict[str, Any] = self.base_row(actor)
         row.update({
@@ -2156,6 +3018,33 @@ class SuspensionExperimentSidecar(threading.Thread):
                 int(bool(suspension_state_valid))
                 if self.needs_suspension_state else ""),
             "identity_fallback_reason": suspension_state_invalid_reason,
+            "diagnostic_status": diagnostic_status,
+            "verify_status": verify_status,
+            "verify_failure_type": verify_failure_type,
+            "readback_mismatch_max_abs": readback_mismatch_max_abs,
+            "readback_mismatch_wheel": readback_mismatch_wheel,
+            "first_mismatch_abs": first_mismatch_values.get(
+                "first_mismatch_abs", ""),
+            "first_mismatch_wheel": first_mismatch_values.get(
+                "first_mismatch_wheel", ""),
+            "vector_mismatch_max_abs": first_mismatch_values.get(
+                "vector_mismatch_max_abs", ""),
+            "vector_mismatch_max_wheel": first_mismatch_values.get(
+                "vector_mismatch_max_wheel", ""),
+            "command_sequence_id": command_sequence_id,
+            "verify_command_sequence_id": verify_command_sequence_id,
+            "verify_apply_frame": verify_apply_frame,
+            "verify_deferred_frame": verify_deferred_frame,
+            "verify_readback_timing": verify_readback_timing,
+            "immediate_readback_status": immediate_readback_status,
+            "immediate_first_mismatch_abs": immediate_mismatch_values.get(
+                "immediate_first_mismatch_abs", ""),
+            "immediate_first_mismatch_wheel": immediate_mismatch_values.get(
+                "immediate_first_mismatch_wheel", ""),
+            "immediate_vector_mismatch_max_abs": immediate_mismatch_values.get(
+                "immediate_vector_mismatch_max_abs", ""),
+            "immediate_vector_mismatch_max_wheel": immediate_mismatch_values.get(
+                "immediate_vector_mismatch_max_wheel", ""),
             "command_applied": 1,
             "apply_count": self.apply_count_by_actor_id[actor_id],
             "verify_count": self.verify_count_by_actor_id[actor_id],
@@ -2194,7 +3083,8 @@ class SuspensionExperimentSidecar(threading.Thread):
             "per_wheel_spring_scale_readback_rr": sequence_item(
                 readback_spring_scales, 3),
             "apply_suspension_command_return_value": type(
-                apply_result).__name__,
+                verify_failure if verify_failure is not None
+                else apply_result).__name__,
             "apply_success": 1,
         })
         row.update(planning_diagnostics(planning, current_frame=state.frame))
@@ -2202,6 +3092,21 @@ class SuspensionExperimentSidecar(threading.Thread):
         row.update(route_progress)
         row.update(task_info)
         row.update(reward_diagnostics)
+        row.update({
+            "diagnostic_status": diagnostic_status,
+            "verify_status": verify_status,
+            "verify_failure_type": verify_failure_type,
+            "readback_mismatch_max_abs": readback_mismatch_max_abs,
+            "readback_mismatch_wheel": readback_mismatch_wheel,
+            "first_mismatch_abs": first_mismatch_values.get(
+                "first_mismatch_abs", ""),
+            "first_mismatch_wheel": first_mismatch_values.get(
+                "first_mismatch_wheel", ""),
+            "vector_mismatch_max_abs": first_mismatch_values.get(
+                "vector_mismatch_max_abs", ""),
+            "vector_mismatch_max_wheel": first_mismatch_values.get(
+                "vector_mismatch_max_wheel", ""),
+        })
         diagnostic_writer.writerow({
             field: format_value(row.get(field, ""))
             for field in DIAGNOSTIC_FIELDS
@@ -4475,6 +5380,9 @@ def run_scenario(
         "scenario_dir": scenario_dir,
         "profile_csv": profile_path,
         "controller_diagnostics_csv": diagnostics_path,
+        "residual_qp_debug_snapshots_jsonl": (
+            sidecar.debug_qp_snapshots_path
+            if os.path.isfile(sidecar.debug_qp_snapshots_path) else ""),
         "metrics_by_episode_csv": metrics_path,
         "sidecar_events_csv": events_path,
         "route_stdout_log": route_log_path,
@@ -4811,6 +5719,7 @@ def main(args: argparse.Namespace) -> None:
     scenarios = selected_scenarios(args.scenarios)
     seeds = parse_seeds(args.seeds)
     command = normalized_command(args)
+    require_step07_residual_shadow_strict_startup_preflight(args, scenarios)
 
     write_json(os.path.join(output_dir, "suite_config.json"), {
         "created_at": time.time(),
@@ -4956,7 +5865,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "planning_aware_v3_mpc_primary_safe,"
         "planning_aware_v3_mpc_primary_authority,"
         "planning_aware_v3_mpc_skyhook_prior,"
-        "planning_aware_v4_mpc_phaseA_authority "
+        "planning_aware_v4_mpc_phaseA_authority,"
+        "planning_aware_v5_residual_id_probe,"
+        "planning_aware_v5_residual_qp_mpc,"
+        "planning_aware_v5_residual_qp_mpc_shadow "
         "(default: stock,identity,pid)")
     parser.add_argument(
         "--baseline-scenario",
@@ -5049,6 +5961,27 @@ def build_arg_parser() -> argparse.ArgumentParser:
         dest="planning_aware_v4_mpc_phaseA_authority_config",
         default=DEFAULT_PLANNING_AWARE_V4_MPC_PHASEA_AUTHORITY_CONFIG,
         help="flat YAML planning-aware v4 MPC Phase A authority config path")
+    parser.add_argument(
+        "--planning-aware-v5-residual-id-probe-config",
+        dest="planning_aware_v5_residual_id_probe_config",
+        default=DEFAULT_PLANNING_AWARE_V5_RESIDUAL_ID_PROBE_CONFIG,
+        help="flat YAML planning-aware v5 residual ID probe config path")
+    parser.add_argument(
+        "--planning-aware-v5-residual-qp-mpc-config",
+        dest="planning_aware_v5_residual_qp_mpc_config",
+        default=DEFAULT_PLANNING_AWARE_V5_RESIDUAL_QP_MPC_CONFIG,
+        help="flat YAML planning-aware v5 residual QP-MPC config path")
+    parser.add_argument(
+        "--planning-aware-v5-residual-qp-mpc-shadow-config",
+        dest="planning_aware_v5_residual_qp_mpc_shadow_config",
+        default=DEFAULT_PLANNING_AWARE_V5_RESIDUAL_QP_MPC_SHADOW_CONFIG,
+        help="flat YAML planning-aware v5 residual QP-MPC shadow config path")
+    parser.add_argument(
+        "--strict-step07-residual-shadow-validation",
+        action="store_true",
+        help=(
+            "tag Step07 residual QP-MPC shadow startup diagnostics as strict; "
+            "the Step07 wrapper performs the pre-CARLA config/model guard"))
     parser.add_argument(
         "--rl-residual-config",
         default=DEFAULT_RL_RESIDUAL_CONFIG,

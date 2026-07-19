@@ -25,6 +25,15 @@ from .planning_aware_skyhook_roll import (
     PlanningAwareSkyhookRollConfig,
     PlanningAwareSkyhookRollController,
 )
+from .planning_aware_residual_id_probe import (
+    PlanningAwareV5ResidualIdProbeConfig,
+    PlanningAwareV5ResidualIdProbeController,
+)
+from .planning_aware_residual_qp_mpc import (
+    PlanningAwareV5ResidualQpMpcConfig,
+    PlanningAwareV5ResidualQpMpcController,
+    PlanningAwareV5ResidualQpMpcShadowController,
+)
 from .rl_residual import ResidualRLConfig, ResidualRLController
 from .skyhook import SkyhookConfig, SkyhookController
 from .skyhook_roll import SkyhookRollConfig, SkyhookRollController
@@ -47,6 +56,11 @@ __all__ = [
     "PlanningPoint",
     "PlanningAwareRiskDampingConfig",
     "PlanningAwareRiskDampingController",
+    "PlanningAwareV5ResidualIdProbeConfig",
+    "PlanningAwareV5ResidualIdProbeController",
+    "PlanningAwareV5ResidualQpMpcConfig",
+    "PlanningAwareV5ResidualQpMpcController",
+    "PlanningAwareV5ResidualQpMpcShadowController",
     "PlanningAwareSkyhookRollConfig",
     "PlanningAwareSkyhookRollController",
     "PlanningPreviewSuspensionController",

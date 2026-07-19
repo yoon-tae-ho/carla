@@ -251,6 +251,23 @@ def planning_info_from_mapping(
         target_speed,
         curvature,
         horizon_dt)
+    metadata = dict(data.get("metadata", {}) or {})
+    for key in (
+            "exporter_schema_version",
+            "exporter_code_version",
+            "producer_step",
+            "producer_frame",
+            "producer_timestamp",
+            "write_timestamp",
+            "trajectory_source",
+            "trajectory_frame",
+            "trajectory_point_semantics",
+            "horizon_dt_source",
+            "speed_semantics",
+            "control_semantics",
+            "validity_reason"):
+        if key in data:
+            metadata.setdefault(key, data.get(key))
     return PlanningInfo(
         points=points,
         available=bool(data.get("available", True)),
@@ -269,7 +286,7 @@ def planning_info_from_mapping(
         route_deviation=_optional_float(data.get("route_deviation")),
         lane_invasion_count=_int(data.get("lane_invasion_count", 0), 0),
         collision_count=_int(data.get("collision_count", 0), 0),
-        metadata=dict(data.get("metadata", {}) or {}),
+        metadata=metadata,
         extra=dict(data.get("extra", {}) or {}))
 
 

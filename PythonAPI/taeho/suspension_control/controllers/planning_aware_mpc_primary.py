@@ -478,6 +478,45 @@ class PlanningAwareV3MpcPrimaryController(SuspensionController):
             wheel_count = max(1, int(_safe_float(self.config.wheel_count, 4)))
         self.previous_final_damper_scales = [1.0 for _ in range(wheel_count)]
 
+    def compute_shadow(self, context: ControllerContext) -> ControllerOutput:
+        """Compute the same tick command without mutating controller state."""
+
+        snapshot = self._state_snapshot()
+        try:
+            return self.compute(context)
+        finally:
+            self._restore_state_snapshot(snapshot)
+
+    def _state_snapshot(self) -> Dict[str, Any]:
+        return {
+            "comfort_samples": list(self.comfort_guard.samples),
+            "comfort_filtered_local_ax": self.comfort_guard.filtered_local_ax,
+            "comfort_filtered_local_ay": self.comfort_guard.filtered_local_ay,
+            "comfort_filtered_yaw_rate": self.comfort_guard.filtered_yaw_rate,
+            "comfort_last_time": self.comfort_guard.last_time,
+            "previous_final_damper_scales": list(
+                self.previous_final_damper_scales),
+            "shadow_previous_damper_scales": list(getattr(
+                self.skyhook_roll_v3_shadow,
+                "previous_damper_scales",
+                ())),
+        }
+
+    def _restore_state_snapshot(self, snapshot: Mapping[str, Any]) -> None:
+        self.comfort_guard.samples = list(snapshot["comfort_samples"])
+        self.comfort_guard.filtered_local_ax = snapshot[
+            "comfort_filtered_local_ax"]
+        self.comfort_guard.filtered_local_ay = snapshot[
+            "comfort_filtered_local_ay"]
+        self.comfort_guard.filtered_yaw_rate = snapshot[
+            "comfort_filtered_yaw_rate"]
+        self.comfort_guard.last_time = snapshot["comfort_last_time"]
+        self.previous_final_damper_scales = list(
+            snapshot["previous_final_damper_scales"])
+        if hasattr(self.skyhook_roll_v3_shadow, "previous_damper_scales"):
+            self.skyhook_roll_v3_shadow.previous_damper_scales = list(
+                snapshot["shadow_previous_damper_scales"])
+
     def compute(self, context: ControllerContext) -> ControllerOutput:
         cfg = self.config
         wheel_count = self._wheel_count(context)

@@ -77,6 +77,46 @@ def test_jsonl_provider_reads_lead_planning_preview_schema(tmp_path):
     assert info.extra["target_points_ego"]["current"] == [5.0, 0.5]
 
 
+def test_jsonl_provider_preserves_top_level_preview_provenance(tmp_path):
+    path = Path(tmp_path) / "lead_planning_v2.jsonl"
+    path.write_text(
+        "{\"schema\": \"taeho.planning_preview.v1\", "
+        "\"source\": \"lead_tfv6\", "
+        "\"available\": true, "
+        "\"step\": 123, "
+        "\"frame\": 4567, "
+        "\"producer_frame\": 4567, "
+        "\"producer_step\": 123, "
+        "\"producer_timestamp\": 12.3, "
+        "\"write_timestamp\": 12.4, "
+        "\"exporter_schema_version\": \"lead_planning_preview_exporter_v2\", "
+        "\"exporter_code_version\": \"unit\", "
+        "\"trajectory_source\": \"pred_route\", "
+        "\"trajectory_frame\": \"lead_model_output_xy_unverified\", "
+        "\"trajectory_point_semantics\": \"unverified\", "
+        "\"horizon_dt_source\": \"exporter_default_constant_0.1_s\", "
+        "\"speed_semantics\": "
+        "\"pred_target_speed_scalar_flattened_not_time_sequence\", "
+        "\"control_semantics\": \"current_final_control_single_sample\", "
+        "\"validity_reason\": \"valid_prediction_with_preview\", "
+        "\"trajectory_xy\": [[2.0, 0.1], [4.0, 0.2]], "
+        "\"target_speed\": [7.8], "
+        "\"metadata\": {\"valid_prediction\": true}}\n")
+    provider = JsonlPlanningInfoProvider(str(path), max_frame_lag=5)
+
+    info = provider.get(4567, VehicleState(frame=4567, speed=8.0), None)
+
+    assert info.metadata["exporter_schema_version"] == (
+        "lead_planning_preview_exporter_v2")
+    assert info.metadata["producer_frame"] == 4567
+    assert info.metadata["trajectory_source"] == "pred_route"
+    assert info.metadata["speed_semantics"] == (
+        "pred_target_speed_scalar_flattened_not_time_sequence")
+    assert info.metadata["control_semantics"] == (
+        "current_final_control_single_sample")
+    assert info.metadata["validity_reason"] == "valid_prediction_with_preview"
+
+
 def test_jsonl_provider_waits_for_partial_final_line(tmp_path):
     path = Path(tmp_path) / "planning_partial.jsonl"
     path.write_text(

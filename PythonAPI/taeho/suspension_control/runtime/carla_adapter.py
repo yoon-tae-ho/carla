@@ -19,6 +19,16 @@ SUSPENSION_FIELDS = (
     "sprung_mass",
 )
 
+WHEEL_LABELS = ("fl", "fr", "rl", "rr")
+
+
+class ScaleReadbackMismatch(RuntimeError):
+    """Structured suspension readback mismatch raised after CARLA apply."""
+
+    def __init__(self, message: str, payload: Dict[str, Any]):
+        RuntimeError.__init__(self, message)
+        self.payload = dict(payload)
+
 
 def pythonapi_root_from_here() -> str:
     return os.path.abspath(os.path.join(
@@ -306,24 +316,131 @@ def read_suspension_scale_summary(native_control: Any, actual_control: Any) -> D
     }
 
 
+def compare_suspension_scales(
+    expected_command: SuspensionCommand,
+    native_control: Any,
+    actual_control: Any,
+    tolerance: float = 1.0e-4,
+) -> Dict[str, Any]:
+    """Compare expected scale command with suspension physics readback."""
+
+    expected_command.validate(expected_wheels=len(native_control.wheels))
+    summary = read_suspension_scale_summary(native_control, actual_control)
+    expected_spring = tuple(
+        float(wheel.spring_scale)
+        for wheel in expected_command.wheels)
+    expected_damper = tuple(
+        float(wheel.damper_scale)
+        for wheel in expected_command.wheels)
+    readback_spring = tuple(float(value) for value in summary["spring_scales"])
+    readback_damper = tuple(float(value) for value in summary["damper_scales"])
+    spring_deltas = tuple(
+        readback - expected
+        for expected, readback in zip(expected_spring, readback_spring))
+    damper_deltas = tuple(
+        readback - expected
+        for expected, readback in zip(expected_damper, readback_damper))
+
+    first_mismatch_field = ""
+    first_mismatch_index = -1
+    first_mismatch_abs = 0.0
+    for field, deltas in (
+            ("spring", spring_deltas),
+            ("damper", damper_deltas)):
+        for index, error in enumerate(deltas):
+            abs_error = abs(error)
+            if abs_error > tolerance:
+                first_mismatch_field = field
+                first_mismatch_index = index
+                first_mismatch_abs = abs_error
+                break
+        if first_mismatch_field:
+            break
+
+    vector_mismatch_field = ""
+    vector_mismatch_index = -1
+    vector_mismatch_max_abs = 0.0
+    for field, deltas in (
+            ("spring", spring_deltas),
+            ("damper", damper_deltas)):
+        for index, error in enumerate(deltas):
+            abs_error = abs(error)
+            if abs_error > vector_mismatch_max_abs:
+                vector_mismatch_field = field
+                vector_mismatch_index = index
+                vector_mismatch_max_abs = abs_error
+
+    first_wheel_label = (
+        WHEEL_LABELS[first_mismatch_index]
+        if 0 <= first_mismatch_index < len(WHEEL_LABELS)
+        else (str(first_mismatch_index) if first_mismatch_index >= 0 else ""))
+    vector_wheel_label = (
+        WHEEL_LABELS[vector_mismatch_index]
+        if 0 <= vector_mismatch_index < len(WHEEL_LABELS)
+        else (str(vector_mismatch_index) if vector_mismatch_index >= 0 else ""))
+    return {
+        "matched": not bool(first_mismatch_field),
+        "hard_error_type": (
+            "%s_readback_mismatch" % first_mismatch_field
+            if first_mismatch_field else ""),
+        "mismatch_field": first_mismatch_field,
+        "mismatch_wheel_index": first_mismatch_index,
+        "mismatch_wheel_label": first_wheel_label,
+        "mismatch_max_abs": first_mismatch_abs,
+        "first_mismatch_field": first_mismatch_field,
+        "first_mismatch_wheel_index": first_mismatch_index,
+        "first_mismatch_wheel_label": first_wheel_label,
+        "first_mismatch_abs": first_mismatch_abs,
+        "vector_mismatch_field": vector_mismatch_field,
+        "vector_mismatch_wheel_index": vector_mismatch_index,
+        "vector_mismatch_wheel_label": vector_wheel_label,
+        "vector_mismatch_max_abs": vector_mismatch_max_abs,
+        "readback_tolerance": float(tolerance),
+        "expected_spring_scales": expected_spring,
+        "readback_spring_scales": readback_spring,
+        "spring_deltas": spring_deltas,
+        "expected_damper_scales": expected_damper,
+        "readback_damper_scales": readback_damper,
+        "damper_deltas": damper_deltas,
+        "readback_summary": summary,
+    }
+
+
+def _mismatch_message(comparison: Dict[str, Any]) -> str:
+    field = str(comparison.get("mismatch_field", "") or "scale")
+    index = int(comparison.get("mismatch_wheel_index", -1))
+    if field == "spring":
+        expected = comparison.get("expected_spring_scales", ())
+        readback = comparison.get("readback_spring_scales", ())
+    else:
+        expected = comparison.get("expected_damper_scales", ())
+        readback = comparison.get("readback_damper_scales", ())
+    try:
+        expected_value = expected[index]
+        readback_value = readback[index]
+    except (IndexError, TypeError):
+        expected_value = ""
+        readback_value = ""
+    return "wheel %d %s scale mismatch: expected %0.9g got %0.9g" % (
+        index,
+        field,
+        expected_value,
+        readback_value)
+
+
 def assert_scale_match(
     expected_command: SuspensionCommand,
     native_control: Any,
     actual_control: Any,
     tolerance: float = 1.0e-4,
 ) -> None:
-    summary = read_suspension_scale_summary(native_control, actual_control)
-    for index, wheel in enumerate(expected_command.wheels):
-        spring_error = abs(summary["spring_scales"][index] - wheel.spring_scale)
-        damper_error = abs(summary["damper_scales"][index] - wheel.damper_scale)
-        if spring_error > tolerance:
-            raise RuntimeError(
-                "wheel %d spring scale mismatch: expected %0.9g got %0.9g" %
-                (index, wheel.spring_scale, summary["spring_scales"][index]))
-        if damper_error > tolerance:
-            raise RuntimeError(
-                "wheel %d damper scale mismatch: expected %0.9g got %0.9g" %
-                (index, wheel.damper_scale, summary["damper_scales"][index]))
+    comparison = compare_suspension_scales(
+        expected_command,
+        native_control,
+        actual_control,
+        tolerance=tolerance)
+    if not comparison["matched"]:
+        raise ScaleReadbackMismatch(_mismatch_message(comparison), comparison)
 
 
 def apply_suspension_command(

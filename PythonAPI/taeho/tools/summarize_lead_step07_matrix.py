@@ -44,6 +44,13 @@ SIDECAR_SCENARIOS = {
     "LEAD_skyhook_roll",
     "LEAD_skyhook_roll_v3",
     "LEAD_planning_aware",
+    "LEAD_planning_aware_v3_mpc_primary_safe",
+    "LEAD_planning_aware_v3_mpc_primary_authority",
+    "LEAD_planning_aware_v3_mpc_skyhook_prior",
+    "LEAD_planning_aware_v4_mpc_phaseA_authority",
+    "LEAD_planning_aware_v5_residual_id_probe",
+    "LEAD_planning_aware_v5_residual_qp_mpc",
+    "LEAD_planning_aware_v5_residual_qp_mpc_shadow",
     "LEAD_constant_damper_1.02",
     "LEAD_constant_damper_1.03",
     "LEAD_pard_v2_shadow",
@@ -61,6 +68,13 @@ JSONL_SCENARIOS = {
     "LEAD_export_only",
     "LEAD_identity_jsonl",
     "LEAD_planning_aware",
+    "LEAD_planning_aware_v3_mpc_primary_safe",
+    "LEAD_planning_aware_v3_mpc_primary_authority",
+    "LEAD_planning_aware_v3_mpc_skyhook_prior",
+    "LEAD_planning_aware_v4_mpc_phaseA_authority",
+    "LEAD_planning_aware_v5_residual_id_probe",
+    "LEAD_planning_aware_v5_residual_qp_mpc",
+    "LEAD_planning_aware_v5_residual_qp_mpc_shadow",
     "LEAD_pard_v2_shadow",
     "LEAD_pard_v2_active_ultra_safe",
     "LEAD_pard_v2_active_safe_1p06",
@@ -72,6 +86,13 @@ JSONL_SCENARIOS = {
 JSONL_SIDECAR_SCENARIOS = {
     "LEAD_identity_jsonl",
     "LEAD_planning_aware",
+    "LEAD_planning_aware_v3_mpc_primary_safe",
+    "LEAD_planning_aware_v3_mpc_primary_authority",
+    "LEAD_planning_aware_v3_mpc_skyhook_prior",
+    "LEAD_planning_aware_v4_mpc_phaseA_authority",
+    "LEAD_planning_aware_v5_residual_id_probe",
+    "LEAD_planning_aware_v5_residual_qp_mpc",
+    "LEAD_planning_aware_v5_residual_qp_mpc_shadow",
     "LEAD_pard_v2_shadow",
     "LEAD_pard_v2_active_ultra_safe",
     "LEAD_pard_v2_active_safe_1p06",
@@ -397,6 +418,73 @@ def parse_scale_mismatch(message: str) -> Optional[float]:
     return abs(actual - expected)
 
 
+def normalized_status(value: Any) -> str:
+    return str(value or "").strip().lower()
+
+
+def truthy_status(value: Any) -> bool:
+    return normalized_status(value) in ("1", "1.0", "true", "yes", "y")
+
+
+def structured_readback_mismatch(row: Mapping[str, Any]) -> Optional[float]:
+    value = float_or_none(row.get("readback_mismatch_max_abs"))
+    if value is not None:
+        return abs(value)
+    deltas = parse_json_number_list(row.get("readback_damper_delta_json", ""))
+    if deltas:
+        return max(abs(delta) for delta in deltas)
+    return None
+
+
+def parse_json_number_list(value: Any) -> List[float]:
+    if not value:
+        return []
+    try:
+        payload = json.loads(str(value))
+    except (TypeError, ValueError):
+        return []
+    if not isinstance(payload, list):
+        return []
+    numbers: List[float] = []
+    for item in payload:
+        number = float_or_none(item)
+        if number is not None:
+            numbers.append(number)
+    return numbers
+
+
+def verification_context_complete(row: Mapping[str, Any]) -> bool:
+    frame = row.get("frame") or row.get("carla_frame")
+    elapsed = row.get("elapsed_seconds") or row.get("game_time")
+    actor = row.get("actor_id") or row.get("actor")
+    return bool(str(frame or "").strip() and str(elapsed or "").strip() and str(actor or "").strip())
+
+
+def verification_suppressed_or_gap(row: Mapping[str, Any]) -> bool:
+    reason = normalized_status(
+        row.get("residual_mpc_suppression_reason") or
+        row.get("suppression_reason") or
+        "")
+    return bool((reason and reason != "none") or truthy_status(row.get("dt_gap")))
+
+
+def verification_actor_removed_or_cleanup(row: Mapping[str, Any], message: str) -> bool:
+    fields = (
+        row.get("event_type", ""),
+        row.get("diagnostic_status", ""),
+        row.get("verify_failure_type", ""),
+        row.get("hard_error_type", ""),
+        row.get("diagnostic_row_emission_skipped_reason", ""),
+    )
+    text = " ".join(str(value or "").lower() for value in fields)
+    return bool(
+        truthy_status(row.get("actor_removed")) or
+        "actor_removed" in text or
+        "cleanup" in text or
+        "actor could not be found in the registry" in message.lower()
+    )
+
+
 def summarize_verification_events(
     path: str,
     actor_removed_is_warning: bool = False,
@@ -404,6 +492,12 @@ def summarize_verification_events(
     summary: Dict[str, Any] = {
         "verify_warning_count": 0,
         "verify_hard_error_count": 0,
+        "verify_failure_event_count": 0,
+        "verify_failure_normal_non_suppressed_count": 0,
+        "verify_failure_suppressed_or_gap_count": 0,
+        "verify_failure_actor_removed_cleanup_count": 0,
+        "verify_failure_logging_insufficient_count": 0,
+        "verify_failure_command_application_mismatch_suspected_count": 0,
         "verify_unclassified_runtime_errors": 0,
         "sidecar_actor_removed_warning_count": 0,
         "sidecar_runtime_hard_error_count": 0,
@@ -423,15 +517,67 @@ def summarize_verification_events(
     runtime_hard_messages = set()
     with open(path, newline="") as csv_file:
         for row in csv.DictReader(csv_file):
-            if row.get("event", "") != "runtime_error":
+            event = normalized_status(row.get("event", ""))
+            event_type = normalized_status(row.get("event_type", ""))
+            hard_error_type = normalized_status(row.get("hard_error_type", ""))
+            if (
+                    event != "runtime_error" and
+                    event_type not in ("verify_failure", "actor_removed", "cleanup")):
                 continue
             message = row.get("message", "")
             lower = message.lower()
+            actor_removed_or_cleanup = verification_actor_removed_or_cleanup(row, message)
+            if actor_removed_or_cleanup:
+                if actor_removed_is_warning or event_type in ("actor_removed", "cleanup"):
+                    summary["sidecar_actor_removed_warning_count"] += 1
+                    actor_removed_messages.add(message)
+                    if event_type in ("verify_failure", "actor_removed", "cleanup"):
+                        summary["verify_failure_actor_removed_cleanup_count"] += 1
+                    continue
+                summary["sidecar_runtime_hard_error_count"] += 1
+                runtime_hard_messages.add(message)
+                continue
+
+            structured_error = structured_readback_mismatch(row)
+            structured_verify = (
+                event_type == "verify_failure" or
+                "readback" in hard_error_type or
+                "mismatch" in hard_error_type or
+                structured_error is not None)
+            if structured_verify:
+                summary["verify_failure_event_count"] += 1
+                error = structured_error
+                if error is None:
+                    error = parse_scale_mismatch(message)
+                hard_error = (
+                    normalized_status(row.get("severity")) == "hard_error" or
+                    hard_error_type not in ("", "none") or
+                    (error is None or not math.isfinite(error) or error > 0.005))
+                if error is not None and math.isfinite(error):
+                    scale_errors.append(error)
+                if verification_suppressed_or_gap(row):
+                    summary["verify_failure_suppressed_or_gap_count"] += 1
+                elif not verification_context_complete(row):
+                    summary["verify_failure_logging_insufficient_count"] += 1
+                else:
+                    summary["verify_failure_normal_non_suppressed_count"] += 1
+                    if hard_error:
+                        summary[
+                            "verify_failure_command_application_mismatch_suspected_count"
+                        ] += 1
+                if hard_error:
+                    summary["verify_hard_error_count"] += 1
+                    hard_messages.add(message)
+                else:
+                    summary["verify_warning_count"] += 1
+                    warning_messages.add(message)
+                continue
             if "scale mismatch" in lower:
                 error = parse_scale_mismatch(message)
                 if error is None or not math.isfinite(error):
                     summary["verify_hard_error_count"] += 1
                     hard_messages.add(message)
+                    summary["verify_failure_logging_insufficient_count"] += 1
                 else:
                     scale_errors.append(error)
                     if error <= 0.002:
@@ -440,6 +586,7 @@ def summarize_verification_events(
                     elif error > 0.005:
                         summary["verify_hard_error_count"] += 1
                         hard_messages.add(message)
+                        summary["verify_failure_logging_insufficient_count"] += 1
                     else:
                         summary["verify_warning_count"] += 1
                         warning_messages.add(message)
@@ -528,6 +675,13 @@ def summarize_diagnostics(
         "planning_jsonl_rejected_messages_max": "",
         "planning_jsonl_read_errors_max": "",
         "diagnostic_nonfinite_values": 0,
+        "diagnostic_verify_failure_rows": 0,
+        "diagnostic_cleanup_rows": 0,
+        "diagnostic_actor_removed_rows": 0,
+        "diagnostic_verify_warning_rows": 0,
+        "diagnostic_verify_hard_error_rows": 0,
+        "diagnostic_readback_mismatch_max_abs": "",
+        "diagnostic_readback_mismatch_wheels": "",
         "damper_nonfinite_violations": 0,
         "damper_bound_violations": 0,
         "damper_min": "",
@@ -575,6 +729,8 @@ def summarize_diagnostics(
     tss_dampers: List[float] = []
     pard_dampers: List[float] = []
     pard_would_dampers: List[float] = []
+    diagnostic_mismatch_errors: List[float] = []
+    diagnostic_mismatch_wheels = set()
     tss_fallback_reasons = set()
     tss_required_fields = (
         "tss_target_speed_raw",
@@ -625,6 +781,29 @@ def summarize_diagnostics(
 
     for row in rows:
         summary["diagnostic_nonfinite_values"] += nonfinite_numeric_literal_count(row)
+        diagnostic_status = normalized_status(row.get("diagnostic_status", ""))
+        verify_status = normalized_status(row.get("verify_status", ""))
+        verify_failure_type = normalized_status(row.get("verify_failure_type", ""))
+        actor_removed_or_cleanup = verification_actor_removed_or_cleanup(row, "")
+        if (
+                not actor_removed_or_cleanup and
+                (diagnostic_status == "verify_failure" or (
+                    verify_failure_type and verify_failure_type != "none"))):
+            summary["diagnostic_verify_failure_rows"] += 1
+        if diagnostic_status == "cleanup":
+            summary["diagnostic_cleanup_rows"] += 1
+        if diagnostic_status == "actor_removed":
+            summary["diagnostic_actor_removed_rows"] += 1
+        if verify_status == "warning":
+            summary["diagnostic_verify_warning_rows"] += 1
+        if verify_status == "hard_error":
+            summary["diagnostic_verify_hard_error_rows"] += 1
+        mismatch_error = structured_readback_mismatch(row)
+        if mismatch_error is not None:
+            diagnostic_mismatch_errors.append(mismatch_error)
+        mismatch_wheel = str(row.get("readback_mismatch_wheel", "") or "").strip()
+        if mismatch_wheel:
+            diagnostic_mismatch_wheels.add(mismatch_wheel)
 
         planning_available = float_or_none(row.get("planning_available"))
         if planning_available is not None and planning_available > 0.0:
@@ -745,6 +924,10 @@ def summarize_diagnostics(
     summary["planning_jsonl_malformed_lines_max"] = max_or_empty(malformed)
     summary["planning_jsonl_rejected_messages_max"] = max_or_empty(rejected)
     summary["planning_jsonl_read_errors_max"] = max_or_empty(read_errors)
+    summary["diagnostic_readback_mismatch_max_abs"] = max_or_empty(
+        diagnostic_mismatch_errors)
+    summary["diagnostic_readback_mismatch_wheels"] = ";".join(
+        sorted(diagnostic_mismatch_wheels))
     summary["damper_min"] = min_or_empty(dampers)
     summary["damper_mean"] = mean_or_empty(dampers)
     summary["damper_max"] = max_or_empty(dampers)
